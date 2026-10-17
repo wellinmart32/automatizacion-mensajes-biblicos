@@ -12,6 +12,9 @@ registro_publicaciones.json
 # Ignorar cola de mensajes elegidos (selección propia de cada usuario)
 mensajes_elegidos.json
 
+# Ignorar destinatarios elegidos para un envío de oraciones (temporal)
+destinatarios_ejecucion.json
+
 # Ignorar grupos reales de WhatsApp (datos personales)
 # El cliente recibe grupos.ejemplo.json como plantilla
 llamados-oracion/grupos.json

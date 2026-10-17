@@ -43,6 +43,7 @@ class PublicadorWhatsAppOracion:
         self.archivo_mensajes = os.path.join(self.carpeta_oracion, "mensajes_oracion.txt")
         self.archivo_grupos = os.path.join(self.carpeta_oracion, "grupos.json")
         self.archivo_config = os.path.join(self.base_dir, "config_global.txt")
+        self.archivo_destinatarios = None
 
         # Tiempos de espera
         self.ESPERA_ENTRE_GRUPOS = 3
@@ -116,7 +117,22 @@ class PublicadorWhatsAppOracion:
         return True
 
     def cargar_grupos(self):
-        """Carga lista de chats seleccionados por defecto en configurador"""
+        """Carga los chats destino: los elegidos para esta ejecución o, si no hay, los seleccionados por defecto"""
+        if self.archivo_destinatarios:
+            if not os.path.exists(self.archivo_destinatarios):
+                raise Exception(f"No se encontró el archivo de destinatarios: {self.archivo_destinatarios}")
+
+            with open(self.archivo_destinatarios, 'r', encoding='utf-8') as f:
+                datos = json.load(f)
+
+            chats = [g for g in datos.get('grupos', []) if g.get('activo', True)]
+
+            if not chats:
+                raise Exception("La selección de destinatarios para esta ejecución está vacía.")
+
+            print(f"🎯 Usando destinatarios elegidos para esta ejecución ({len(chats)})")
+            return chats
+
         if not os.path.exists(self.archivo_grupos):
             raise Exception(f"No se encontró {self.archivo_grupos}")
 
@@ -619,7 +635,14 @@ def main():
     except Exception:
         pass
 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--destinatarios', default=None)
+    args, _ = parser.parse_known_args()
+
     publicador = PublicadorWhatsAppOracion()
+    if args.destinatarios:
+        publicador.archivo_destinatarios = os.path.abspath(args.destinatarios)
 
     try:
         exito = publicador.publicar_en_todos_los_chats()

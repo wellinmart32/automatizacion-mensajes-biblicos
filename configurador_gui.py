@@ -888,6 +888,10 @@ class ConfiguradorGUI:
         ventana.geometry(f'480x580+{x}+{y}')
         ventana.deiconify()
 
+    def _nombre_corto(self, nombre, maximo=17):
+        """Acorta nombres largos solo para mostrarlos; el nombre completo se usa al enviar"""
+        return nombre if len(nombre) <= maximo else nombre[:maximo].rstrip() + "…"
+
     def _abrir_selector_destinatarios(self):
         """Panel para marcar qué grupos/contactos reciben oraciones por defecto"""
         import json
@@ -983,7 +987,7 @@ class ConfiguradorGUI:
                 fila.pack(fill='x', pady=3)
 
                 tk.Checkbutton(fila,
-                               text=f"{icono} {g['nombre']}",
+                               text=f"{icono} {self._nombre_corto(g['nombre'])}",
                                variable=var, bg="#f0f0f0",
                                font=("Segoe UI", 10), width=20, anchor='w').pack(side='left')
 

@@ -667,7 +667,7 @@ class PanelControl:
             messagebox.showerror("❌ Error", f"No se pudo iniciar la publicación:\n{e}")
 
     def _enviar_oraciones(self):
-        """Ejecuta envío de oraciones usando destinatarios configurados por defecto"""
+        """Abre la selección de destinatarios para este envío de oraciones"""
         import json
 
         archivo_grupos = os.path.join(self.base_dir, "llamados-oracion", "grupos.json")
@@ -685,31 +685,179 @@ class PanelControl:
         try:
             with open(archivo_grupos, 'r', encoding='utf-8') as f:
                 datos = json.load(f)
-            grupos = [g for g in datos.get('grupos', []) if g.get('seleccionado', True) and g.get('activo', True)]
+            grupos = [g for g in datos.get('grupos', []) if g.get('activo', True)]
         except Exception as e:
             messagebox.showerror("❌ Error", f"Error leyendo grupos:\n{e}")
             return
 
         if not grupos:
             respuesta = messagebox.askokcancel(
-                "⚠️ Sin destinatarios seleccionados",
-                "No hay destinatarios seleccionados por defecto.\n\n"
-                "¿Deseas abrir el Configurador para configurarlos ahora?"
+                "⚠️ Sin grupos ni contactos",
+                "No hay grupos ni contactos registrados para oraciones.\n\n"
+                "¿Deseas abrir el Configurador para agregarlos ahora?"
             )
             if respuesta:
                 self._abrir_configurador(pestaña='oraciones')
             return
 
-        try:
-            exe = self._exe("OracionesWhatsApp.exe")
-            if os.path.exists(exe):
-                subprocess.Popen([exe])
-            else:
-                script = os.path.join(self.base_dir, "publicadores", "whatsapp_oracion.py")
-                subprocess.Popen([sys.executable, script])
-            self._toast("📱 Oraciones WhatsApp", f"Enviando a {len(grupos)} destinatario(s)...")
-        except Exception as e:
-            messagebox.showerror("❌ Error", f"No se pudo iniciar el módulo:\n{e}")
+        self._abrir_selector_oraciones(archivo_grupos, grupos)
+
+    def _nombre_corto(self, nombre, maximo=17):
+        """Acorta nombres largos solo para mostrarlos; el nombre completo se usa al enviar"""
+        return nombre if len(nombre) <= maximo else nombre[:maximo].rstrip() + "…"
+
+    def _leer_mensajes_oracion(self):
+        """Retorna (mensajes_grupos, mensajes_individuales) desde mensajes_oracion.txt"""
+        archivo_msg = os.path.join(self.base_dir, "llamados-oracion", "mensajes_oracion.txt")
+        if not os.path.exists(archivo_msg):
+            return [], []
+
+        with open(archivo_msg, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+
+        if '[GRUPOS]' in contenido and '[INDIVIDUALES]' in contenido:
+            partes = contenido.split('[INDIVIDUALES]')
+            mensajes_grupos = [l.strip() for l in partes[0].replace('[GRUPOS]', '').strip().split('\n') if l.strip()]
+            mensajes_individuales = [l.strip() for l in partes[1].strip().split('\n') if l.strip()]
+            return mensajes_grupos, mensajes_individuales
+
+        todas = [l.strip() for l in contenido.split('\n') if l.strip() and not l.startswith('[')]
+        return todas, todas
+
+    def _abrir_selector_oraciones(self, archivo_grupos, grupos):
+        """Ventana para elegir los destinatarios de este envío sin cambiar los de por defecto"""
+        import json
+        from tkinter import ttk
+
+        ventana = tk.Toplevel(self.root)
+        ventana.withdraw()
+        ventana.title("📱 Enviar oraciones")
+        ventana.resizable(False, False)
+        ventana.configure(bg="#f0f0f0")
+        ventana.transient(self.root)
+        ventana.grab_set()
+
+        def cerrar():
+            ventana.grab_release()
+            ventana.destroy()
+
+        header = tk.Frame(ventana, bg="#25D366", pady=12)
+        header.pack(fill='x')
+        tk.Label(header, text="📱 Enviar oraciones por WhatsApp",
+                 font=("Segoe UI", 12, "bold"), bg="#25D366", fg="white").pack()
+        tk.Label(header, text="Elige quién recibe la oración en este envío",
+                 font=("Segoe UI", 8), bg="#25D366", fg="#eafff1").pack()
+
+        frame = tk.Frame(ventana, bg="#f0f0f0", padx=20, pady=10)
+        frame.pack(fill='both', expand=True)
+
+        vars_sel = []
+        vars_msg = []
+        var_todos = tk.BooleanVar()
+
+        def toggle_todos():
+            for v in vars_sel:
+                v.set(var_todos.get())
+
+        tk.Checkbutton(frame, text="Seleccionar todos", variable=var_todos, command=toggle_todos,
+                       font=("Segoe UI", 10, "bold"), bg="#f0f0f0").pack(anchor='w', pady=(0, 4))
+        tk.Frame(frame, bg="#ccc", height=1).pack(fill='x', pady=(0, 8))
+
+        canvas = tk.Canvas(frame, bg="#f0f0f0", highlightthickness=0, height=200)
+        scroll = tk.Scrollbar(frame, orient='vertical', command=canvas.yview)
+        frame_scroll = tk.Frame(canvas, bg="#f0f0f0")
+        frame_scroll.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=frame_scroll, anchor='nw')
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side='left', fill='both', expand=True)
+        scroll.pack(side='right', fill='y')
+
+        mensajes_grupos, mensajes_individuales = self._leer_mensajes_oracion()
+
+        for g in grupos:
+            var = tk.BooleanVar(value=g.get('seleccionado', True))
+            vars_sel.append(var)
+
+            disponibles = mensajes_grupos if g.get('tipo') == 'grupo' else mensajes_individuales
+            guardado = g.get('mensaje_asignado')
+            var_msg = tk.StringVar(value=guardado if guardado in disponibles else "🎲 Aleatorio")
+            vars_msg.append(var_msg)
+
+            fila = tk.Frame(frame_scroll, bg="#f0f0f0")
+            fila.pack(fill='x', pady=3)
+            icono = "👥" if g.get('tipo') == 'grupo' else "👤"
+            tk.Checkbutton(fila, text=f"{icono} {self._nombre_corto(g['nombre'])}", variable=var, bg="#f0f0f0",
+                           font=("Segoe UI", 10), width=20, anchor='w').pack(side='left')
+            ttk.Combobox(fila, textvariable=var_msg, values=["🎲 Aleatorio"] + disponibles,
+                         state='readonly', width=30, font=("Segoe UI", 8)).pack(side='left', padx=(5, 0))
+
+        def actualizar_todos(*_):
+            var_todos.set(all(v.get() for v in vars_sel))
+        for v in vars_sel:
+            v.trace_add('write', actualizar_todos)
+        actualizar_todos()
+
+        var_guardar = tk.BooleanVar(value=False)
+        tk.Checkbutton(ventana, text="💾 Guardar también como destinatarios por defecto", variable=var_guardar,
+                       font=("Segoe UI", 9), bg="#f0f0f0").pack(anchor='w', padx=20, pady=(4, 0))
+
+        def enviar():
+            estado = {}
+            elegidos = []
+            for g, var, var_msg in zip(grupos, vars_sel, vars_msg):
+                mensaje = None if var_msg.get() == "🎲 Aleatorio" else var_msg.get()
+                estado[g['nombre']] = (var.get(), mensaje)
+                if var.get():
+                    elegidos.append({
+                        'nombre': g['nombre'],
+                        'tipo': g.get('tipo', 'grupo'),
+                        'mensaje_asignado': mensaje
+                    })
+
+            if not elegidos:
+                messagebox.showwarning("⚠️ Aviso", "Marca al menos un destinatario", parent=ventana)
+                return
+
+            ruta = os.path.join(self.base_dir, "destinatarios_ejecucion.json")
+            try:
+                if var_guardar.get():
+                    with open(archivo_grupos, 'r', encoding='utf-8') as f:
+                        datos = json.load(f)
+                    for g in datos.get('grupos', []):
+                        if g.get('nombre') in estado:
+                            g['seleccionado'], g['mensaje_asignado'] = estado[g['nombre']]
+                    with open(archivo_grupos, 'w', encoding='utf-8') as f:
+                        json.dump(datos, f, ensure_ascii=False, indent=2)
+
+                with open(ruta, 'w', encoding='utf-8') as f:
+                    json.dump({'grupos': elegidos}, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                messagebox.showerror("❌ Error", f"Error guardando la selección:\n{e}", parent=ventana)
+                return
+
+            cerrar()
+            try:
+                exe = self._exe("OracionesWhatsApp.exe")
+                if os.path.exists(exe):
+                    subprocess.Popen([exe, "--destinatarios", ruta])
+                else:
+                    script = os.path.join(self.base_dir, "publicadores", "whatsapp_oracion.py")
+                    subprocess.Popen([sys.executable, script, "--destinatarios", ruta])
+                self._toast("📱 Oraciones WhatsApp", f"Enviando a {len(elegidos)} destinatario(s)...")
+            except Exception as e:
+                messagebox.showerror("❌ Error", f"No se pudo iniciar el módulo:\n{e}")
+
+        frame_footer = tk.Frame(ventana, bg="#f0f0f0", padx=20)
+        frame_footer.pack(fill='x', pady=(8, 15))
+        tk.Button(frame_footer, text="Cancelar", font=("Segoe UI", 10),
+                  bg="#e0e0e0", command=cerrar, width=12).pack(side='left')
+        tk.Button(frame_footer, text="📱 Enviar", font=("Segoe UI", 10, "bold"),
+                  bg="#25D366", fg="white", command=enviar, width=14).pack(side='right')
+
+        ventana.protocol("WM_DELETE_WINDOW", cerrar)
+        ventana.update_idletasks()
+        self._centrar_ventana(ventana, 500, 440)
+        ventana.deiconify()
 
     def _abrir_configurador(self, pestaña=None, pestana=None):
         """Abre el configurador — bloquea el grid mientras está abierto"""
@@ -922,13 +1070,18 @@ class PanelControl:
              "📱 ENVIAR ORACIONES POR WHATSAPP\n\n"
              "Envía un llamado de oración a los grupos y contactos configurados en WhatsApp.\n\n"
              "¿Qué hace?\n"
-             "• Abre WhatsApp Web en el navegador\n"
-             "• Busca cada grupo o contacto configurado\n"
-             "• Envía el mensaje de oración correspondiente\n"
+             "• Muestra tus destinatarios por defecto ya marcados\n"
+             "• Te deja elegir quién recibe la oración en este envío y con qué mensaje\n"
+             "• Abre WhatsApp Web y envía solo a los que marcaste\n"
              "• Usa mensajes distintos para grupos e individuales\n\n"
+             "Destinatarios de este envío:\n"
+             "• Lo que marques aplica solo a este envío\n"
+             "• Tu lista por defecto no cambia, salvo que marques\n"
+             "  '💾 Guardar también como destinatarios por defecto'\n\n"
              "¿Cuándo usarlo?\n"
              "• Para convocar a tu comunidad a momentos de oración\n"
-             "• Se puede programar con Tareas Automáticas\n\n"
+             "• Para enviar una oración puntual a un grupo o persona\n"
+             "• Las Tareas Automáticas usan siempre la lista por defecto\n\n"
              "Configuración relacionada:\n"
              "• Configurador → pestaña Oraciones (navegador, mensajes)\n"
              "• Configurador → pestaña Oraciones → Destinatarios por defecto\n\n"
