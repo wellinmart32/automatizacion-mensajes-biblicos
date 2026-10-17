@@ -50,7 +50,9 @@ def leer_config_global():
         'permitir_forzar_publicacion_manual': config['LIMITES']['permitir_forzar_publicacion_manual'].lower() == 'si',
         
         # [MENSAJES]
-        'seleccion': config['MENSAJES']['seleccion'].lower(),
+        'seleccion': _normalizar_seleccion(config['MENSAJES']['seleccion']),
+        'relleno_hibrido': _normalizar_seleccion(config.get('MENSAJES', 'relleno_hibrido', fallback='aleatorio')),
+        'cantidad_por_ejecucion': max(1, min(10, int(config.get('MENSAJES', 'cantidad_por_ejecucion', fallback='1')))),
         'historial_evitar_repetir': int(config['MENSAJES']['historial_evitar_repetir']),
         'formato_fecha': config['MENSAJES']['formato_fecha'].lower() == 'si',
         'agregar_hashtags': config['MENSAJES']['agregar_hashtags'].lower() == 'si',
@@ -404,6 +406,177 @@ def aplicar_transformaciones_mensaje(contenido, config):
         mensaje_final = f"{mensaje_final}\n\n{config['texto_firma']}"
     
     return mensaje_final
+
+
+def _normalizar_seleccion(valor):
+    valor = (valor or '').strip().lower()
+    equivalencias = {
+        'aleatoria': 'aleatorio',
+        'secuencia': 'secuencial',
+        'elegido': 'elegidos',
+        'hibrida': 'hibrido',
+        'híbrido': 'hibrido',
+    }
+    valor = equivalencias.get(valor, valor)
+    if valor not in ('aleatorio', 'secuencial', 'elegidos', 'hibrido'):
+        return 'aleatorio'
+    return valor
+
+
+def _ruta_mensajes_elegidos():
+    return os.path.join(_base_dir(), 'mensajes_elegidos.json')
+
+
+def leer_mensajes_elegidos():
+    """Retorna la cola de mensajes elegidos manualmente, en orden de publicación"""
+    import json
+    ruta = _ruta_mensajes_elegidos()
+    if not os.path.exists(ruta):
+        return []
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            datos = json.load(f)
+        return [m for m in datos.get('elegidos', []) if isinstance(m, str)]
+    except Exception as e:
+        print(f"⚠️  Error leyendo mensajes elegidos: {e}")
+        return []
+
+
+def guardar_mensajes_elegidos(lista):
+    import json
+    ruta = _ruta_mensajes_elegidos()
+    sin_duplicados = list(dict.fromkeys(lista))
+    try:
+        with open(ruta, 'w', encoding='utf-8') as f:
+            json.dump({'elegidos': sin_duplicados}, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"⚠️  Error guardando mensajes elegidos: {e}")
+        return False
+
+
+def quitar_mensaje_elegido(nombre_archivo):
+    elegidos = leer_mensajes_elegidos()
+    if nombre_archivo in elegidos:
+        elegidos.remove(nombre_archivo)
+        guardar_mensajes_elegidos(elegidos)
+
+
+def _leer_mensaje_transformado(carpeta, nombre_archivo, config):
+    ruta = os.path.join(carpeta, nombre_archivo)
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            contenido = f.read().strip()
+        return aplicar_transformaciones_mensaje(contenido, config)
+    except Exception as e:
+        print(f"❌ Error leyendo mensaje {nombre_archivo}: {e}")
+        return None
+
+
+def _rellenar_aleatorio(todos, ya_elegidos, cantidad, registro_publicaciones, config):
+    limite = config['historial_evitar_repetir']
+    historial_reciente = registro_publicaciones.get('historial_reciente', [])
+    bloqueados = set(historial_reciente[-limite:]) if limite > 0 else set()
+
+    candidatos = [m for m in todos if m not in ya_elegidos and m not in bloqueados]
+    random.shuffle(candidatos)
+    seleccion = candidatos[:cantidad]
+
+    if len(seleccion) < cantidad:
+        # Si la memoria bloquea demasiados, se permite repetir antes que publicar menos
+        reserva = [m for m in todos if m not in ya_elegidos and m not in seleccion]
+        random.shuffle(reserva)
+        seleccion += reserva[:cantidad - len(seleccion)]
+
+    return seleccion
+
+
+def _rellenar_secuencial(todos, ya_elegidos, cantidad, registro_publicaciones):
+    ultimo_biblico = None
+    for entrada in reversed(registro_publicaciones.get('historial_completo', [])):
+        if entrada.get('tipo', 'biblico') == 'biblico':
+            ultimo_biblico = entrada.get('mensaje_archivo')
+            break
+
+    inicio = 0
+    if ultimo_biblico in todos:
+        inicio = (todos.index(ultimo_biblico) + 1) % len(todos)
+
+    seleccion = []
+    for i in range(len(todos)):
+        nombre = todos[(inicio + i) % len(todos)]
+        if nombre in ya_elegidos:
+            continue
+        seleccion.append(nombre)
+        if len(seleccion) >= cantidad:
+            break
+
+    return seleccion
+
+
+def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
+    """
+    Arma la lista de mensajes bíblicos a publicar en esta ejecución.
+
+    Primero toma la cola de elegidos (modos 'elegidos' e 'hibrido') y luego
+    completa hasta 'cantidad' con aleatorio o secuencial según el modo.
+
+    Returns:
+        list[dict]: [{'nombre': str, 'contenido': str, 'elegido': bool}, ...]
+    """
+    carpeta = os.path.join(_base_dir(), config['carpeta_mensajes'])
+    if not os.path.exists(carpeta):
+        print(f"❌ No existe la carpeta: {carpeta}")
+        return []
+
+    todos = sorted([f for f in os.listdir(carpeta) if f.endswith('.txt')])
+    if not todos:
+        print(f"❌ No hay archivos .txt en la carpeta: {carpeta}")
+        return []
+
+    modo = config['seleccion']
+    cantidad = cantidad or config['cantidad_por_ejecucion']
+
+    elegidos = []
+    if modo in ('elegidos', 'hibrido'):
+        cola = leer_mensajes_elegidos()
+        inexistentes = [m for m in cola if m not in todos]
+        if inexistentes:
+            print(f"⚠️  Elegidos que ya no existen (se ignoran): {', '.join(inexistentes)}")
+        elegidos = [m for m in cola if m in todos][:cantidad]
+
+    faltantes = cantidad - len(elegidos)
+    relleno = []
+    tipo_relleno = None
+    if faltantes > 0:
+        if modo in ('aleatorio', 'secuencial'):
+            tipo_relleno = modo
+        elif modo == 'hibrido':
+            tipo_relleno = config['relleno_hibrido'] if config['relleno_hibrido'] in ('aleatorio', 'secuencial') else 'aleatorio'
+
+        if tipo_relleno == 'aleatorio':
+            relleno = _rellenar_aleatorio(todos, elegidos, faltantes, registro_publicaciones, config)
+        elif tipo_relleno == 'secuencial':
+            relleno = _rellenar_secuencial(todos, elegidos, faltantes, registro_publicaciones)
+
+    print(f"📦 Total de mensajes disponibles: {len(todos)}")
+    print(f"🎯 Modo: {modo}" + (f" (relleno {config['relleno_hibrido']})" if modo == 'hibrido' else ''))
+    print(f"🔢 Cantidad por ejecución: {cantidad}")
+
+    resultado = []
+    for nombre in elegidos + relleno:
+        contenido = _leer_mensaje_transformado(carpeta, nombre, config)
+        if contenido:
+            resultado.append({'nombre': nombre, 'contenido': contenido, 'elegido': nombre in elegidos})
+
+    for i, m in enumerate(resultado, 1):
+        marca = "📌" if m['elegido'] else ("📋" if tipo_relleno == 'secuencial' else "🎲")
+        print(f"   {i}. {marca} {m['nombre']}")
+
+    if modo == 'elegidos' and not resultado:
+        print("📭 No hay mensajes elegidos en cola")
+
+    return resultado
 
 
 def obtener_ruta_perfil_navegador():

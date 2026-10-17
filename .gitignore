@@ -9,6 +9,9 @@
 # Ignorar registro de publicaciones (contiene historial)
 registro_publicaciones.json
 
+# Ignorar cola de mensajes elegidos (selección propia de cada usuario)
+mensajes_elegidos.json
+
 # Ignorar grupos reales de WhatsApp (datos personales)
 # El cliente recibe grupos.ejemplo.json como plantilla
 llamados-oracion/grupos.json
@@ -234,6 +237,10 @@ tramp
 chromedriver.log
 geckodriver.log
 selenium-debug.log
+
+# Drivers de navegador: Selenium Manager descarga la versión compatible automáticamente
+geckodriver.exe
+chromedriver.exe
 
 # Node modules
 node_modules/

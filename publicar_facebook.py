@@ -17,8 +17,8 @@ from datetime import datetime
 from compartido.gestor_archivos import (
     leer_config_global,
     verificar_y_crear_estructura,
-    obtener_mensaje_aleatorio_sin_repetir,
-    obtener_mensaje_secuencial,
+    obtener_mensajes_a_publicar,
+    quitar_mensaje_elegido,
     contar_predicaciones_pendientes,
     obtener_siguiente_predicacion,
     mover_predicacion_a_publicados
@@ -75,23 +75,16 @@ def mostrar_configuracion(config):
     print(f"   🌐 Navegador: {config['navegador'].upper()}")
     print(f"   🎲 Selección: {config['seleccion'].capitalize()}")
     print(f"   💾 Memoria: Últimos {config['historial_evitar_repetir']} mensajes")
-    print(f"   🔄 Máx. intentos: {config.get('max_intentos', 3)}")
+    print(f"   🔢 Mensajes por ejecución: {config['cantidad_por_ejecucion']}")
+    print(f"   🔄 Máx. intentos: {config.get('max_intentos_por_publicacion', 3)}")
     if config.get('activar_predicaciones'):
         print(f"   🎬 Predicaciones: ACTIVADAS")
         print(f"   📱 Grupo WhatsApp: {config['nombre_grupo_whatsapp']}")
     print()
 
 
-def obtener_contenido_publicacion(gestor, config):
-    if config['seleccion'] in ('aleatorio', 'aleatoria'):
-        contenido, nombre_archivo = obtener_mensaje_aleatorio_sin_repetir(gestor.registro)
-    else:
-        contenido, nombre_archivo = obtener_mensaje_secuencial(gestor.registro)
-    return (contenido, nombre_archivo), 'biblico'
-
-
 def publicar_con_reintentos(publicador, contenido, tipo_publicacion, config, gestor, nombre_archivo=None):
-    max_intentos = config.get('max_intentos', 3)
+    max_intentos = config.get('max_intentos_por_publicacion', 3)
     tiempo_entre_intentos = config.get('tiempo_entre_intentos', 10)
 
     for intento in range(1, max_intentos + 1):
@@ -125,35 +118,51 @@ def _publicar_mensaje_biblico(config):
     gestor.mostrar_estadisticas()
     gestor.mostrar_historial_reciente(5)
 
-    if not gestor.puede_publicar_ahora(config.get('max_publicaciones_por_dia', 20)):
-        print(f"\n⚠️  Límite diario alcanzado")
+    tiempo_minimo = config['tiempo_minimo_entre_publicaciones_segundos']
+    puede, motivo = gestor.puede_publicar_ahora(tiempo_minimo, config['permitir_forzar_publicacion_manual'])
+    print(f"\n⏱️  {motivo}")
+    if not puede:
+        print(f"{A}⚠️  Aún no se cumple el tiempo mínimo entre publicaciones{X}")
         return
 
-    contenido_data, tipo_pub = obtener_contenido_publicacion(gestor, config)
-    contenido, nombre_archivo = contenido_data
-    if not contenido:
+    mensajes = obtener_mensajes_a_publicar(gestor.registro, config)
+    if not mensajes:
         print("❌ No hay mensajes disponibles")
         return
 
-    print(f"\n📖 Mensaje seleccionado: {nombre_archivo}")
+    total = len(mensajes)
+    exitosos = 0
     publicador = PublicadorFacebook(config)
     publicador.iniciar_navegador()
 
     try:
-        inicio = time.time()
-        exito = publicar_con_reintentos(publicador, contenido, tipo_pub, config, gestor, nombre_archivo)
-        if exito:
-            gestor.registrar_publicacion_exitosa(nombre_archivo, '', 0, 1, round(time.time() - inicio, 2), tipo='biblico')
-            print(f"\n{V}{N}" + "="*70 + X)
-            print(f"{V}{N}✅ MENSAJE BÍBLICO PUBLICADO EXITOSAMENTE{X}")
-            print(f"{V}{N}" + "="*70 + X)
-        else:
-            print(f"\n{R}{N}" + "="*70 + X)
-            print(f"{R}{N}❌ NO SE PUDO PUBLICAR EL MENSAJE{X}")
-            print(f"{R}{N}" + "="*70 + X)
-            gestor.registrar_error(nombre_archivo, tipo_pub, "Falló después de todos los intentos")
+        for i, mensaje in enumerate(mensajes, 1):
+            nombre_archivo = mensaje['nombre']
+            marca = " 📌" if mensaje['elegido'] else ""
+            print(f"\n{N}{C}📖 MENSAJE {i}/{total}: {nombre_archivo}{marca}{X}")
+
+            inicio = time.time()
+            exito = publicar_con_reintentos(publicador, mensaje['contenido'], 'biblico', config, gestor, nombre_archivo)
+            if exito:
+                exitosos += 1
+                gestor.registrar_publicacion_exitosa(nombre_archivo, '', 0, 1, round(time.time() - inicio, 2), tipo='biblico')
+                if mensaje['elegido']:
+                    quitar_mensaje_elegido(nombre_archivo)
+                print(f"{V}✅ Mensaje {i}/{total} publicado{X}")
+            else:
+                print(f"{R}❌ No se pudo publicar {nombre_archivo}{X}")
+                gestor.registrar_error(nombre_archivo, "Falló después de todos los intentos", tipo='biblico')
+
+            if i < total:
+                print(f"\n⏳ Esperando {tiempo_minimo}s antes del siguiente mensaje...")
+                time.sleep(tiempo_minimo)
     finally:
         publicador.cerrar_navegador()
+
+    color = V if exitosos == total else (A if exitosos else R)
+    print(f"\n{color}{N}" + "="*70 + X)
+    print(f"{color}{N}📊 MENSAJES BÍBLICOS PUBLICADOS: {exitosos}/{total}{X}")
+    print(f"{color}{N}" + "="*70 + X)
 
 
 def _publicar_predicacion(config):
@@ -207,7 +216,7 @@ def _publicar_predicacion(config):
             print(f"\n{R}{N}" + "="*70 + X)
             print(f"{R}{N}❌ NO SE PUDO PUBLICAR LA PREDICACIÓN{X}")
             print(f"{R}{N}" + "="*70 + X)
-            gestor.registrar_error(titulo, 'predicacion', "Falló después de todos los intentos")
+            gestor.registrar_error(titulo, "Falló después de todos los intentos", tipo='predicacion')
     finally:
         publicador.cerrar_navegador()
 
@@ -377,6 +386,11 @@ def main():
         return
 
     es_full = estado_licencia.get('tipo') in ['FULL', 'MASTER'] or estado_licencia.get('developer_permanente')
+
+    if not es_full:
+        config['cantidad_por_ejecucion'] = 1
+        if config['seleccion'] in ('elegidos', 'hibrido'):
+            config['seleccion'] = 'aleatorio'
 
     if es_doble_clic and es_full:
         _validar_y_ejecutar_secuencia(config)

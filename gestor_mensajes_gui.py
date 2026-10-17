@@ -2,6 +2,7 @@ import os
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+from compartido.gestor_archivos import leer_mensajes_elegidos, guardar_mensajes_elegidos, quitar_mensaje_elegido
 
 
 class GestorMensajesGUI:
@@ -25,7 +26,7 @@ class GestorMensajesGUI:
         self.root.withdraw()
 
         self.root.title("📝 Gestor de Mensajes Bíblicos")
-        self.root.minsize(700, 500)
+        self.root.minsize(700, 600)
         self.root.resizable(True, True)
         self.root.configure(bg="#f0f0f0")
 
@@ -52,6 +53,7 @@ class GestorMensajesGUI:
         except Exception:
             pass
 
+        self.es_full = self._verificar_licencia_full()
         self._construir_ui()
         self._cargar_mensajes()
 
@@ -134,6 +136,67 @@ class GestorMensajesGUI:
             fg="white",
             command=self._eliminar_mensaje
         ).pack(side='left', expand=True, fill='x', padx=(2, 0), ipady=6)
+
+        # ==================== COLA DE ELEGIDOS ====================
+        if self.es_full:
+            tk.Button(
+                panel_izq,
+                text="📌 Elegir para publicar",
+                font=("Segoe UI", 10, "bold"),
+                bg="#ffc107",
+                fg="#333",
+                command=self._elegir_mensaje
+            ).pack(fill='x', pady=(6, 0), ipady=4)
+
+            tk.Label(
+                panel_izq,
+                text="📌 Cola de publicación",
+                font=("Segoe UI", 10, "bold"),
+                bg="#f0f0f0"
+            ).pack(anchor='w', pady=(10, 2))
+
+            self.lista_cola = tk.Listbox(
+                panel_izq,
+                height=5,
+                font=("Segoe UI", 9),
+                selectmode='single',
+                exportselection=False,
+                bg="#fffbe6",
+                relief='solid',
+                borderwidth=1
+            )
+            self.lista_cola.pack(fill='x')
+
+            frame_btn_cola = tk.Frame(panel_izq, bg="#f0f0f0")
+            frame_btn_cola.pack(fill='x', pady=(4, 0))
+            for texto, comando in [
+                ("↑", lambda: self._mover_elegido(-1)),
+                ("↓", lambda: self._mover_elegido(1)),
+                ("✖ Quitar", self._quitar_elegido),
+            ]:
+                tk.Button(frame_btn_cola, text=texto, font=("Segoe UI", 9), bg="#e0e0e0",
+                          command=comando).pack(side='left', expand=True, fill='x', padx=1)
+
+            tk.Label(
+                panel_izq,
+                text="Se usa en modo Solo elegidos o Híbrido\n(Configurador → Mensajes)",
+                font=("Segoe UI", 8),
+                fg="#777",
+                bg="#f0f0f0",
+                justify='left'
+            ).pack(anchor='w', pady=(4, 0))
+        else:
+            tk.Button(
+                panel_izq,
+                text="🔒 Elegir para publicar — Completa",
+                font=("Segoe UI", 9),
+                bg="#e0e0e0",
+                fg="#9e9e9e",
+                command=lambda: messagebox.showinfo(
+                    "🔒 Versión Completa",
+                    "Elegir mensajes específicos para publicar requiere la versión Completa.\n\n"
+                    "Adquiérela en automapro.com")
+            ).pack(fill='x', pady=(6, 0), ipady=4)
 
         # ==================== PANEL DERECHO (editor) ====================
         panel_der = tk.Frame(panel, bg="#f0f0f0")
@@ -235,6 +298,7 @@ class GestorMensajesGUI:
             self.lista.insert(tk.END, mensaje)
 
         self.lbl_contador.config(text=f"{len(mensajes)} mensajes")
+        self._cargar_cola()
 
     def _on_seleccionar(self, event):
         """Al seleccionar un mensaje de la lista lo muestra en el editor"""
@@ -349,11 +413,86 @@ class GestorMensajesGUI:
 
         try:
             os.remove(ruta)
+            quitar_mensaje_elegido(nombre)
             self._cargar_mensajes()
             self._limpiar_editor()
             messagebox.showinfo("✅ Éxito", f"Mensaje eliminado: {nombre}")
         except Exception as e:
             messagebox.showerror("❌ Error", f"Error al eliminar: {e}")
+
+    def _verificar_licencia_full(self):
+        """Verifica si la licencia es FULL/MASTER — solo cache, sin llamada de red"""
+        try:
+            from gestor_licencias import GestorLicencias
+            gl = GestorLicencias("MensajesBiblicos")
+            cache = gl._obtener_cache_local()
+            if cache and cache.get('valida'):
+                tipo = cache.get('tipo', 'TRIAL')
+                return tipo in ['FULL', 'MASTER'] or cache.get('es_developer_permanente', False)
+            return False
+        except Exception:
+            return False
+
+    def _elegidos_actuales(self):
+        existentes = set(self.lista.get(0, tk.END))
+        return [m for m in leer_mensajes_elegidos() if m in existentes]
+
+    def _cargar_cola(self):
+        """Muestra la cola de elegidos y resalta esos mensajes en la lista principal"""
+        if not hasattr(self, 'lista_cola'):
+            return
+
+        elegidos = self._elegidos_actuales()
+        self.lista_cola.delete(0, tk.END)
+        for i, nombre in enumerate(elegidos, 1):
+            self.lista_cola.insert(tk.END, f"{i}. {nombre}")
+
+        for i in range(self.lista.size()):
+            self.lista.itemconfig(i, bg="#fff3cd" if self.lista.get(i) in elegidos else "white")
+
+    def _elegir_mensaje(self):
+        seleccion = self.lista.curselection()
+        if not seleccion:
+            messagebox.showwarning("⚠️ Aviso", "Selecciona un mensaje de la lista para elegirlo")
+            return
+
+        nombre = self.lista.get(seleccion[0])
+        elegidos = self._elegidos_actuales()
+        if nombre in elegidos:
+            messagebox.showinfo("📌 Ya elegido", f"'{nombre}' ya está en la cola (posición {elegidos.index(nombre) + 1})")
+            return
+
+        elegidos.append(nombre)
+        guardar_mensajes_elegidos(elegidos)
+        self._cargar_cola()
+
+    def _mover_elegido(self, direccion):
+        seleccion = self.lista_cola.curselection()
+        if not seleccion:
+            messagebox.showwarning("⚠️ Aviso", "Selecciona un mensaje de la cola para moverlo")
+            return
+
+        idx = seleccion[0]
+        nuevo = idx + direccion
+        elegidos = self._elegidos_actuales()
+        if nuevo < 0 or nuevo >= len(elegidos):
+            return
+
+        elegidos[idx], elegidos[nuevo] = elegidos[nuevo], elegidos[idx]
+        guardar_mensajes_elegidos(elegidos)
+        self._cargar_cola()
+        self.lista_cola.selection_set(nuevo)
+
+    def _quitar_elegido(self):
+        seleccion = self.lista_cola.curselection()
+        if not seleccion:
+            messagebox.showwarning("⚠️ Aviso", "Selecciona un mensaje de la cola para quitarlo")
+            return
+
+        elegidos = self._elegidos_actuales()
+        del elegidos[seleccion[0]]
+        guardar_mensajes_elegidos(elegidos)
+        self._cargar_cola()
 
     def _limpiar_editor(self):
         """Limpia solo el texto del editor, sin deseleccionar de la lista"""

@@ -898,18 +898,25 @@ class PanelControl:
         TEMAS = [
             ("▶️  Publicar Mensaje Bíblico",
              "▶️ PUBLICAR MENSAJE BÍBLICO EN FACEBOOK\n\n"
-             "Publica automáticamente un mensaje bíblico en tu página o perfil de Facebook.\n\n"
+             "Publica automáticamente mensajes bíblicos en tu página o perfil de Facebook.\n\n"
              "¿Qué hace?\n"
              "• Abre el navegador configurado (Firefox o Chrome)\n"
              "• Inicia sesión usando tu perfil guardado\n"
-             "• Selecciona un mensaje de tu carpeta 'mensajes/'\n"
-             "• Lo publica en Facebook y registra la actividad\n\n"
+             "• Elige los mensajes de tu carpeta 'mensajes/' según el modo configurado\n"
+             "• Publica la cantidad configurada (1 por defecto), esperando el tiempo mínimo entre cada uno\n"
+             "• Registra la actividad de cada publicación\n\n"
+             "Modos de selección:\n"
+             "• 🎲 Aleatorio → evita repetir los últimos publicados\n"
+             "• 📋 Secuencial → sigue el orden de los archivos\n"
+             "• 📌 Solo elegidos → publica los que marcaste en el Gestor de Mensajes\n"
+             "• 🔀 Híbrido → primero los elegidos y completa con aleatorio o secuencial\n\n"
              "¿Cuándo usarlo?\n"
              "• Cuando quieras publicar manualmente un mensaje bíblico\n"
              "• Si no tienes tareas automáticas programadas\n\n"
              "Configuración relacionada:\n"
-             "• Configurador → pestaña General (navegador, selección de mensaje)\n"
-             "• Configurador → pestaña Mensajes (hashtags, firma, historial)"),
+             "• Configurador → pestaña Publicar Bíblico (navegador, intentos)\n"
+             "• Configurador → pestaña Mensajes (modo, cantidad, memoria, hashtags)\n\n"
+             "⚠️ Cantidad, Solo elegidos e Híbrido requieren versión Completa"),
 
             ("📱  Enviar Oraciones por WhatsApp",
              "📱 ENVIAR ORACIONES POR WHATSAPP\n\n"
@@ -981,7 +988,7 @@ class PanelControl:
              "el comportamiento de todos los módulos.\n\n"
              "Pestañas disponibles:\n"
              "• General → navegador, perfil, modo debug\n"
-             "• Mensajes → selección, hashtags, firma, historial\n"
+             "• Mensajes → modo de selección, cantidad por ejecución, hashtags, historial\n"
              "• Publicación → tiempos de espera, reintentos\n"
              "• Extractor WhatsApp → grupo, cantidad a extraer, mensaje intro\n"
              "• Oraciones → navegador, mensajes de oración, destinatarios\n"
@@ -997,11 +1004,12 @@ class PanelControl:
              "• Ver todos los mensajes en tu carpeta 'mensajes/'\n"
              "• Crear mensajes nuevos con el editor\n"
              "• Editar o eliminar mensajes existentes\n"
-             "• Los archivos se guardan como .txt con nombre 'mensaje-XXX.txt'\n\n"
+             "• Los archivos se guardan como .txt con nombre 'mensaje-XXX.txt'\n"
+             "• 📌 Elegir mensajes para publicar y ordenar la cola (versión Completa)\n\n"
              "Consejos:\n"
              "• Un mensaje por archivo\n"
              "• Puedes incluir saltos de línea y emojis\n"
-             "• El sistema los selecciona en orden aleatorio o secuencial"),
+             "• Los elegidos se usan en modo Solo elegidos o Híbrido y salen de la cola al publicarse"),
 
             ("📊  Estadísticas",
              "📊 ESTADÍSTICAS\n\n"

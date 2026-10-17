@@ -1137,7 +1137,9 @@ class WizardPrimeraVez:
         }
         
         config['MENSAJES'] = {
-            'seleccion': 'aleatoria',
+            'seleccion': 'aleatorio',
+            'relleno_hibrido': 'aleatorio',
+            'cantidad_por_ejecucion': '1',
             'historial_evitar_repetir': '5',
             'formato_fecha': 'no',
             'agregar_hashtags': 'no',

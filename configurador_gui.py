@@ -5,6 +5,7 @@ import configparser
 import tkinter as tk
 from tkinter import ttk, messagebox
 from compartido.toast import Toast
+from compartido.gestor_archivos import leer_mensajes_elegidos
 
 
 class ConfiguradorGUI:
@@ -84,6 +85,8 @@ class ConfiguradorGUI:
 
             sel = self.var_seleccion.get()
             self.config['MENSAJES']['seleccion'] = sel if sel else 'aleatorio'
+            self.config['MENSAJES']['relleno_hibrido'] = self.var_relleno_hibrido.get()
+            self.config['MENSAJES']['cantidad_por_ejecucion'] = self._cantidad_valida() if self.es_full else '1'
             self.config['MENSAJES']['historial_evitar_repetir'] = self.var_historial.get()
             self.config['MENSAJES']['agregar_hashtags'] = self.var_hashtags.get()
             self.config['MENSAJES']['hashtags'] = self.var_hashtags_texto.get()
@@ -198,6 +201,12 @@ class ConfiguradorGUI:
         except:
             return defecto
 
+    def _cantidad_valida(self):
+        try:
+            return str(max(1, min(10, int(self.var_cantidad.get()))))
+        except (ValueError, tk.TclError):
+            return '1'
+
     def _seccion(self, parent, texto):
         tk.Label(parent, text=texto, font=("Segoe UI", 10, "bold"), bg="#f0f0f0", fg="#333").pack(anchor='w', padx=20, pady=(12, 2))
 
@@ -254,7 +263,60 @@ class ConfiguradorGUI:
         tk.Label(tab_mensajes, text="Configura cómo se eligen y formatean los mensajes bíblicos al publicar",
                  font=("Segoe UI", 9), fg="#555", bg="#f0f0f0").pack(anchor='w', padx=20, pady=(10, 0))
 
-        self.var_seleccion = tk.StringVar(value='aleatorio')
+        seleccion_guardada = self._get('MENSAJES', 'seleccion', 'aleatorio').lower()
+        seleccion_guardada = {'aleatoria': 'aleatorio'}.get(seleccion_guardada, seleccion_guardada)
+        if seleccion_guardada not in ('aleatorio', 'secuencial', 'elegidos', 'hibrido'):
+            seleccion_guardada = 'aleatorio'
+        if not self.es_full and seleccion_guardada in ('elegidos', 'hibrido'):
+            seleccion_guardada = 'aleatorio'
+        self.var_seleccion = tk.StringVar(value=seleccion_guardada)
+        self.var_relleno_hibrido = tk.StringVar(value=self._get('MENSAJES', 'relleno_hibrido', 'aleatorio'))
+        self.var_cantidad = tk.StringVar(value=self._get('MENSAJES', 'cantidad_por_ejecucion', '1') if self.es_full else '1')
+
+        self._seccion(tab_mensajes, "🎯 Cómo elegir los mensajes a publicar")
+        frame_modo = tk.Frame(tab_mensajes, bg="#f0f0f0")
+        frame_modo.pack(anchor='w', padx=20, pady=(0, 2))
+        for valor, icono, nombre, solo_full in [
+            ('aleatorio',  "🎲", "Aleatorio",     False),
+            ('secuencial', "📋", "Secuencial",    False),
+            ('elegidos',   "📌", "Solo elegidos", True),
+            ('hibrido',    "🔀", "Híbrido",       True),
+        ]:
+            bloqueado = solo_full and not self.es_full
+            tk.Radiobutton(frame_modo, text=f"{'🔒' if bloqueado else icono} {nombre}",
+                           variable=self.var_seleccion, value=valor, bg="#f0f0f0", font=("Segoe UI", 10),
+                           state='disabled' if bloqueado else 'normal').pack(side='left', padx=6)
+
+        frame_relleno = tk.Frame(tab_mensajes, bg="#f0f0f0")
+        frame_relleno.pack(anchor='w', padx=40, pady=(0, 6))
+        tk.Label(frame_relleno, text="Híbrido completa con:", font=("Segoe UI", 9), fg="#555", bg="#f0f0f0").pack(side='left')
+        radios_relleno = []
+        for valor, nombre in [('aleatorio', "Aleatorio"), ('secuencial', "Secuencial")]:
+            rb = tk.Radiobutton(frame_relleno, text=nombre, variable=self.var_relleno_hibrido, value=valor,
+                                bg="#f0f0f0", font=("Segoe UI", 9))
+            rb.pack(side='left', padx=6)
+            radios_relleno.append(rb)
+
+        def _actualizar_relleno(*_):
+            estado = 'normal' if self.var_seleccion.get() == 'hibrido' else 'disabled'
+            for rb in radios_relleno:
+                rb.config(state=estado)
+        self.var_seleccion.trace_add('write', _actualizar_relleno)
+        _actualizar_relleno()
+
+        self._seccion(tab_mensajes, "🔢 Mensajes a publicar por ejecución")
+        frame_cantidad = tk.Frame(tab_mensajes, bg="#f0f0f0")
+        frame_cantidad.pack(anchor='w', padx=20, pady=(0, 2))
+        tk.Spinbox(frame_cantidad, from_=1, to=10, textvariable=self.var_cantidad, width=8, font=("Segoe UI", 10),
+                   state='normal' if self.es_full else 'disabled').pack(side='left')
+        tk.Label(frame_cantidad, text=f"📌 {len(leer_mensajes_elegidos())} elegido(s) en cola",
+                 font=("Segoe UI", 9), fg="#555", bg="#f0f0f0").pack(side='left', padx=12)
+        tk.Label(tab_mensajes, text="Entre cada mensaje se espera el tiempo mínimo de la pestaña Avanzado",
+                 font=("Segoe UI", 8), fg="#777", bg="#f0f0f0").pack(anchor='w', padx=20, pady=(0, 6))
+
+        if not self.es_full:
+            tk.Label(tab_mensajes, text="🔒 Cantidad, Solo elegidos e Híbrido requieren versión Completa",
+                     font=("Segoe UI", 8), bg="#fff3cd", fg="#856404").pack(anchor='w', padx=20, pady=(0, 6))
 
         self._seccion(tab_mensajes, "🧠 Memoria: últimos N mensajes a evitar repetir")
         self.var_historial = tk.StringVar(value=self._get('MENSAJES', 'historial_evitar_repetir', '5'))
