@@ -19,6 +19,9 @@ from compartido.gestor_archivos import (
     verificar_y_crear_estructura,
     obtener_mensajes_a_publicar,
     quitar_mensaje_elegido,
+    obtener_config_tarea,
+    registrar_evento_tarea,
+    MODULOS_DISPONIBLES,
     contar_predicaciones_pendientes,
     obtener_siguiente_predicacion,
     mover_predicacion_a_publicados
@@ -230,15 +233,44 @@ def _ejecutar_secuencia_full(config):
     modulos = cfg.get('SECUENCIA', 'modulos_activos', fallback='biblico,extraer,publicar_predica').strip()
     lista = [m.strip() for m in modulos.split(',') if m.strip()]
 
+    _ejecutar_modulos(config, lista)
+
+
+def _base_dir_app():
+    return os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+
+
+def _comando_modulo(nombre_exe, script_relativo):
+    """Ruta del .exe compilado o, en desarrollo, el script .py equivalente"""
+    base_dir = _base_dir_app()
+    exe = os.path.join(base_dir, nombre_exe)
+    if os.path.exists(exe):
+        return [exe]
+    script = os.path.join(base_dir, script_relativo)
+    if not getattr(sys, 'frozen', False) and os.path.exists(script):
+        return [sys.executable, script]
+    return None
+
+
+def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None):
+    """Ejecuta las acciones en orden. Con id_de_tarea valida cada una antes y nunca se queda esperando respuesta"""
+    import subprocess
+    import json
+
+    nombres = dict(MODULOS_DISPONIBLES)
+
     for modulo in lista:
+        if id_de_tarea and not _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea):
+            continue
+
         if modulo == 'biblico':
             _publicar_mensaje_biblico(config)
 
         elif modulo == 'extraer':
-            exe = os.path.join(base_dir, 'ExtractorPredicaciones.exe')
-            if os.path.exists(exe):
+            comando = _comando_modulo('ExtractorPredicaciones.exe', os.path.join('extractores', 'extractor_whatsapp_predicaciones.py'))
+            if comando:
                 print("\n🎬 Iniciando extracción de predicaciones...")
-                subprocess.Popen([exe]).wait()
+                subprocess.Popen(comando).wait()
             else:
                 print("⚠️  ExtractorPredicaciones.exe no encontrado")
 
@@ -249,12 +281,108 @@ def _ejecutar_secuencia_full(config):
                 print("\n📭 Sin predicaciones pendientes para publicar")
 
         elif modulo == 'oraciones':
-            exe = os.path.join(base_dir, 'OracionesWhatsApp.exe')
-            if os.path.exists(exe):
+            comando = _comando_modulo('OracionesWhatsApp.exe', os.path.join('publicadores', 'whatsapp_oracion.py'))
+            if comando:
+                if destinatarios:
+                    ruta = os.path.join(_base_dir_app(), 'destinatarios_ejecucion.json')
+                    with open(ruta, 'w', encoding='utf-8') as f:
+                        json.dump({'grupos': destinatarios}, f, ensure_ascii=False, indent=2)
+                    comando = comando + ['--destinatarios', ruta]
                 print("\n📱 Iniciando envío de oraciones...")
-                subprocess.Popen([exe]).wait()
+                subprocess.Popen(comando).wait()
             else:
                 print("⚠️  OracionesWhatsApp.exe no encontrado")
+
+        if id_de_tarea:
+            registrar_evento_tarea(id_de_tarea, f"✅ Ejecutada \"{nombres.get(modulo, modulo).split('  ')[-1]}\"")
+
+
+def _hay_destinatarios_por_defecto():
+    import json
+    ruta = os.path.join(_base_dir_app(), 'llamados-oracion', 'grupos.json')
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            grupos = json.load(f).get('grupos', [])
+        return any(g.get('seleccionado', True) and g.get('activo', True) for g in grupos)
+    except Exception:
+        return False
+
+
+def _abrir_configurador_sin_esperar(pestana):
+    import subprocess
+    base_dir = _base_dir_app()
+    exe_cfg = os.path.join(base_dir, "ConfiguradorMensajes.exe")
+    try:
+        if os.path.exists(exe_cfg):
+            subprocess.Popen([exe_cfg, f"--pestana={pestana}"])
+        else:
+            subprocess.Popen([sys.executable, os.path.join(base_dir, "configurador_gui.py"), f"--pestana={pestana}"])
+    except Exception as e:
+        print(f"⚠️  No se pudo abrir el Configurador: {e}")
+
+
+def _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea):
+    """Revisa lo que necesita una acción de una tarea; si falta algo avisa con cuenta regresiva y la omite"""
+    from compartido.aviso_temporizado import AvisoTemporizado
+
+    nombre_modulo = dict(MODULOS_DISPONIBLES).get(modulo, modulo).split('  ')[-1]
+    problema = None
+    pestana = None
+
+    if modulo in ('extraer', 'publicar_predica') and not config.get('nombre_grupo_whatsapp', '').strip():
+        problema = "Falta el nombre del grupo de WhatsApp de prédicas"
+        pestana = 'extractor'
+    elif modulo == 'oraciones' and not destinatarios and not _hay_destinatarios_por_defecto():
+        problema = "No hay destinatarios de oración por defecto"
+        pestana = 'oraciones'
+
+    if not problema:
+        return True
+
+    print(f"\n{A}⚠️  {problema} → se omite \"{nombre_modulo}\"{X}")
+    eleccion, respondio = AvisoTemporizado.preguntar(
+        problema,
+        f"La acción \"{nombre_modulo}\" de la tarea \"{id_de_tarea}\" no se puede ejecutar.\n"
+        "Las demás acciones de la tarea continúan.",
+        [('configurar', "Abrir Configurador"), ('omitir', "Omitir esta acción")],
+        'omitir'
+    )
+    if eleccion == 'configurar':
+        _abrir_configurador_sin_esperar(pestana)
+
+    detalle = "respondido" if respondio else f"sin respuesta, {AvisoTemporizado.SEGUNDOS_DEFECTO} s"
+    registrar_evento_tarea(id_de_tarea, f"⏭️ Omitida \"{nombre_modulo}\": {problema} ({detalle})")
+    return False
+
+
+def _ejecutar_tarea(config, id_de_tarea):
+    """Ejecuta las acciones propias de una tarea automática"""
+    config_tarea = obtener_config_tarea(id_de_tarea)
+
+    if not config_tarea:
+        print(f"{A}⚠️  La tarea '{id_de_tarea}' no tiene configuración propia. Se usa la secuencia general.{X}")
+        registrar_evento_tarea(id_de_tarea, "⚠️ Sin configuración propia: se usó la secuencia general")
+        _ejecutar_secuencia_full(config)
+        return
+
+    modulos = config_tarea.get('modulos', [])
+    destinatarios = config_tarea.get('destinatarios')
+    nombres = dict(MODULOS_DISPONIBLES)
+
+    print(f"\n{N}{C}🗓️  TAREA AUTOMÁTICA: {config_tarea.get('nombre', id_de_tarea)}{X}")
+    for i, modulo in enumerate(modulos, 1):
+        print(f"   {i}. {nombres.get(modulo, modulo)}")
+    if 'oraciones' in modulos:
+        print(f"   📱 Destinatarios: {f'{len(destinatarios)} propios de la tarea' if destinatarios else 'los de por defecto'}")
+
+    if not modulos:
+        print(f"{A}⚠️  La tarea no tiene acciones activas{X}")
+        registrar_evento_tarea(id_de_tarea, "⚠️ Sin acciones activas")
+        return
+
+    registrar_evento_tarea(id_de_tarea, "▶️ Inicio")
+    _ejecutar_modulos(config, modulos, destinatarios, id_de_tarea)
+    registrar_evento_tarea(id_de_tarea, "🏁 Fin")
 
 
 def _validar_y_ejecutar_secuencia(config):
@@ -367,15 +495,19 @@ def main():
     parser.add_argument('--solo-biblico', action='store_true')
     parser.add_argument('--secuencia', action='store_true')
     parser.add_argument('--modulo', default=None)
+    parser.add_argument('--tarea', default=None)
     args, _ = parser.parse_known_args()
 
-    es_doble_clic = not args.solo_biblico and not args.secuencia and args.modulo is None
+    es_doble_clic = not args.solo_biblico and not args.secuencia and args.modulo is None and args.tarea is None
 
     estado_licencia = verificar_licencia_inicio()
     if not estado_licencia:
         _abrir_consola()
         print("\n⏰ Acceso bloqueado — período de prueba expirado o licencia inválida.")
-        input("\nPresiona Enter para cerrar...")
+        if args.tarea:
+            registrar_evento_tarea(args.tarea, "⛔ No se ejecutó: licencia inválida o expirada")
+        else:
+            input("\nPresiona Enter para cerrar...")
         return
 
     try:
@@ -401,7 +533,11 @@ def main():
     mostrar_configuracion(config)
 
     try:
-        if args.modulo == 'publicar_predicaciones':
+        if args.tarea and es_full:
+            _ejecutar_tarea(config, args.tarea)
+        elif args.tarea:
+            _publicar_mensaje_biblico(config)
+        elif args.modulo == 'publicar_predicaciones':
             _publicar_predicacion(config)
         elif args.solo_biblico:
             _publicar_mensaje_biblico(config)

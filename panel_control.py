@@ -5,6 +5,7 @@ from tkinter import messagebox
 import subprocess
 from gestor_licencias import GestorLicencias
 from gestor_registro import GestorRegistro
+from compartido.gestor_archivos import migrar_tareas_antiguas
 from compartido.toast import Toast
 
 
@@ -56,6 +57,21 @@ class PanelControl:
         self.root.deiconify()
 
         self._verificar_actualizacion()
+        self._migrar_tareas_en_segundo_plano()
+
+    def _migrar_tareas_en_segundo_plano(self):
+        """Convierte en silencio las tareas automáticas antiguas al formato con --tarea"""
+        import threading
+        def migrar():
+            try:
+                migradas = migrar_tareas_antiguas()
+            except Exception as e:
+                print(f"⚠️  Error actualizando tareas automáticas: {e}")
+                return
+            if migradas:
+                self.root.after(0, lambda: self._toast("🔄 Tareas automáticas actualizadas",
+                                                       f"{migradas} tarea(s) convertida(s) al formato nuevo"))
+        threading.Thread(target=migrar, daemon=True).start()
 
     def _exe(self, nombre):
         """Retorna ruta al .exe en la misma carpeta del ejecutable"""
@@ -1081,7 +1097,7 @@ class PanelControl:
              "¿Cuándo usarlo?\n"
              "• Para convocar a tu comunidad a momentos de oración\n"
              "• Para enviar una oración puntual a un grupo o persona\n"
-             "• Las Tareas Automáticas usan siempre la lista por defecto\n\n"
+             "• Cada Tarea Automática puede usar la lista por defecto o sus propios destinatarios\n\n"
              "Configuración relacionada:\n"
              "• Configurador → pestaña Oraciones (navegador, mensajes)\n"
              "• Configurador → pestaña Oraciones → Destinatarios por defecto\n\n"
@@ -1181,13 +1197,19 @@ class PanelControl:
              "Programa el sistema para que se ejecute automáticamente en los "
              "días y horas que elijas, sin que tengas que abrirlo manualmente.\n\n"
              "¿Qué puedes programar?\n"
-             "• Días de la semana y hora de ejecución\n"
-             "• Qué módulo ejecutar (bíblico, secuencia completa, etc.)\n"
-             "• Múltiples tareas con distintos horarios\n\n"
+             "• Pestaña 📅 Horario: días de la semana y hora de ejecución\n"
+             "• Pestaña ⚡ Acciones: qué hace cada tarea y en qué orden\n"
+             "  (Bíblico, Extraer, Prédica, Oraciones)\n"
+             "• Destinatarios de oración propios para cada tarea\n"
+             "• Múltiples tareas con distintos horarios y acciones\n\n"
              "¿Cómo funciona?\n"
              "• Usa el Programador de Tareas de Windows\n"
              "• La tarea se activa aunque no tengas el panel abierto\n"
              "• El equipo debe estar encendido a la hora programada\n\n"
+             "Si falta configuración:\n"
+             "• Aparece un aviso con cuenta regresiva de 30 segundos\n"
+             "• Si nadie responde, se omite solo esa acción y siguen las demás\n"
+             "• Todo queda anotado en 'registro_tareas.log'\n\n"
              "⚠️ Requiere versión Completa"),
         ]
 

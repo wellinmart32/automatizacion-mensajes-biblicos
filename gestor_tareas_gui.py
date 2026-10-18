@@ -5,6 +5,17 @@ from tkinter import ttk, messagebox
 import subprocess
 from datetime import datetime
 from gestor_licencias import GestorLicencias
+from compartido.gestor_archivos import (
+    id_tarea,
+    obtener_config_tarea,
+    guardar_config_tarea,
+    eliminar_config_tarea,
+    id_de_nombre_tarea,
+    migrar_tareas_antiguas,
+    modulos_secuencia_general,
+    MODULOS_DISPONIBLES
+)
+from compartido.selector_destinatarios import SelectorDestinatarios
 
 
 class GestorTareasGUI:
@@ -136,18 +147,20 @@ class GestorTareasGUI:
         scrollbar = ttk.Scrollbar(frame_lista)
         scrollbar.pack(side='right', fill='y')
         
-        columnas = ('nombre', 'dias', 'proxima', 'estado')
+        columnas = ('nombre', 'dias', 'acciones', 'proxima', 'estado')
         self.tree = ttk.Treeview(frame_lista, columns=columnas, show='headings', yscrollcommand=scrollbar.set, selectmode='browse')
         
         self.tree.heading('nombre', text='Nombre de Tarea')
         self.tree.heading('dias', text='Días')
+        self.tree.heading('acciones', text='Acciones')
         self.tree.heading('proxima', text='Próxima Ejecución')
         self.tree.heading('estado', text='Estado')
         
-        self.tree.column('nombre', width=300)
-        self.tree.column('dias', width=100)
-        self.tree.column('proxima', width=250)
-        self.tree.column('estado', width=150)
+        self.tree.column('nombre', width=250)
+        self.tree.column('dias', width=90)
+        self.tree.column('acciones', width=200)
+        self.tree.column('proxima', width=190)
+        self.tree.column('estado', width=110)
         
         self.tree.pack(fill='both', expand=True)
         scrollbar.config(command=self.tree.yview)
@@ -160,7 +173,7 @@ class GestorTareasGUI:
         tk.Button(acciones_frame, text="✏️ Editar", font=("Segoe UI", 10), bg="#ffc107", width=12, command=self._editar_tarea).pack(side='left', padx=(0, 10))
         tk.Button(acciones_frame, text="🗑️ Eliminar", font=("Segoe UI", 10), bg="#dc3545", fg="white", width=12, command=self._eliminar_tarea).pack(side='left')
 
-    def _cargar_tareas(self):
+    def _cargar_tareas(self, migrar=True):
         for item in self.tree.get_children():
             self.tree.delete(item)
         
@@ -175,11 +188,12 @@ class GestorTareasGUI:
             )
             
             if resultado.returncode != 0:
-                self.tree.insert('', 'end', values=('Error cargando tareas', '', '', ''))
+                self.tree.insert('', 'end', values=('Error cargando tareas', '', '', '', ''))
                 return
             
             lineas = resultado.stdout.strip().split('\n')
             tareas_encontradas = False
+            por_migrar = []
             
             for linea in lineas[1:]:
                 partes = linea.split('","')
@@ -192,6 +206,10 @@ class GestorTareasGUI:
                         nombre_corto = nombre.split('\\')[-1]
                         detalles = self._obtener_detalles_tarea(nombre_corto)
                         dias_texto = self._extraer_dias_cortos(detalles) if detalles else 'N/A'
+                        comando = detalles.get('comando', '') if detalles else ''
+                        if comando and '--tarea' not in comando:
+                            por_migrar.append((nombre_corto, comando))
+                        acciones = self._resumen_acciones(self._id_de(nombre_corto))
                         
                         estado_lower = estado_raw.lower()
                         if any(x in estado_lower for x in ['ready', 'listo', 'en espera', 'queued']):
@@ -203,11 +221,17 @@ class GestorTareasGUI:
                         else:
                             estado = estado_raw
                         
-                        self.tree.insert('', 'end', values=(nombre_corto, dias_texto, proxima, estado))
+                        self.tree.insert('', 'end', values=(nombre_corto, dias_texto, acciones, proxima, estado))
                         tareas_encontradas = True
             
             if not tareas_encontradas:
-                self.tree.insert('', 'end', values=('No hay tareas programadas', '', '', ''))
+                self.tree.insert('', 'end', values=('No hay tareas programadas', '', '', '', ''))
+
+            if migrar and por_migrar:
+                migradas = migrar_tareas_antiguas()
+                if migradas:
+                    self._cargar_tareas(migrar=False)
+                    self._mostrar_toast(f"🔄 {migradas} tarea(s) actualizada(s) al formato nuevo\nMantienen sus días, hora y acciones", duracion=4500)
         
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar tareas:\n{e}")
@@ -236,7 +260,9 @@ class GestorTareasGUI:
                     clave = partes[0].strip()
                     valor = partes[1].strip() if len(partes) > 1 else ''
                     
-                    if 'Hora de inicio' in clave or 'Start Time' in clave:
+                    if 'Tarea que se ejecutar' in clave or 'Task To Run' in clave:
+                        detalles['comando'] = valor
+                    elif 'Hora de inicio' in clave or 'Start Time' in clave:
                         detalles['horario'] = valor
                     elif 'Tipo de programación' in clave or 'Schedule Type' in clave:
                         detalles['frecuencia'] = valor
@@ -346,7 +372,8 @@ class GestorTareasGUI:
             ("Frecuencia:", frecuencia_mostrar),
             ("Días:", detalles.get('dias', 'N/A')),
             ("Estado:", detalles.get('estado', 'N/A')),
-            ("Próxima ejecución:", detalles.get('Hora próxima ejecución', 'N/A'))
+            ("Próxima ejecución:", detalles.get('Hora próxima ejecución', 'N/A')),
+            ("Acciones:", self._resumen_acciones(self._id_de(nombre_tarea)))
         ]:
             item_frame = tk.Frame(contenido, bg="white")
             item_frame.pack(fill='x', padx=15, pady=5)
@@ -380,14 +407,7 @@ class GestorTareasGUI:
             messagebox.showerror("Error", "No se pudieron obtener los detalles de la tarea")
             return
         
-        horario_actual = detalles.get('horario', '09:00:00')
-        try:
-            hora_parts = horario_actual.split(':')
-            hora_inicial = hora_parts[0]
-            minuto_inicial = hora_parts[1]
-        except:
-            hora_inicial = '09'
-            minuto_inicial = '00'
+        hora_inicial, minuto_inicial = self._hora_24(detalles.get('horario', '09:00:00'))
         
         tipo_programacion = detalles.get('frecuencia', '').lower()
         dias_actuales = detalles.get('dias', '')
@@ -430,8 +450,17 @@ class GestorTareasGUI:
         header.pack(fill='x')
         tk.Label(header, text=titulo, font=("Segoe UI", 14, "bold"), bg=color_header, fg="white" if color_header != "#ffc107" else "black").pack()
         
-        form = tk.Frame(ventana, bg="#f0f0f0")
-        form.pack(fill='both', expand=True, padx=30, pady=15)
+        notebook = ttk.Notebook(ventana)
+        notebook.pack(fill='both', expand=True, padx=15, pady=(10, 0))
+        tab_horario = tk.Frame(notebook, bg="#f0f0f0")
+        tab_acciones = tk.Frame(notebook, bg="#f0f0f0")
+        notebook.add(tab_horario, text="📅 Horario")
+        notebook.add(tab_acciones, text="⚡ Acciones")
+
+        form = tk.Frame(tab_horario, bg="#f0f0f0")
+        form.pack(fill='both', expand=True, padx=10, pady=15)
+
+        obtener_acciones = self._construir_pestana_acciones(tab_acciones, self._id_de(nombre_tarea) if es_edicion else None)
         
         tk.Label(form, text="Nombre de la tarea:", font=("Segoe UI", 10, "bold"), bg="#f0f0f0").pack(anchor='w', pady=(0, 3))
         
@@ -527,6 +556,11 @@ class GestorTareasGUI:
             if not nombre:
                 messagebox.showerror("Error", "Debes ingresar un nombre")
                 return
+
+            acciones = obtener_acciones()
+            if acciones is None:
+                notebook.select(tab_acciones)
+                return
             
             frecuencia = var_frecuencia.get()
             dias_selec = []
@@ -577,6 +611,7 @@ class GestorTareasGUI:
                 nombre_completo = n if n.startswith(self.prefijo_tarea) else f"{self.prefijo_tarea}_{n}"
                 subprocess.run(['schtasks', '/Delete', '/TN', nombre_completo, '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
+            guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'])
             ventana.destroy()
             self._crear_tarea_windows(nombre, frecuencia, horario, dias_selec if frecuencia == "WEEKLY" else None, mostrar_aviso_hora)
             
@@ -594,11 +629,7 @@ class GestorTareasGUI:
     def _crear_tarea_windows(self, nombre, frecuencia, horario, dias=None, ya_mostro_aviso=False):
         try:
             nombre_completo = nombre if nombre.startswith(self.prefijo_tarea) else f"{self.prefijo_tarea}_{nombre}"
-            if self.ruta_exe and os.path.exists(self.ruta_exe):
-                comando_tarea = f'"{self.ruta_exe}"'
-            else:
-                directorio_trabajo = os.path.dirname(self.ruta_script)
-                comando_tarea = f'cmd /c "cd /d "{directorio_trabajo}" && py "{self.ruta_script}""'
+            comando_tarea = self._comando_tarea(self._id_de(nombre_completo))
             
             comando = ['schtasks', '/Create', '/TN', nombre_completo, '/TR', comando_tarea, '/SC', frecuencia, '/ST', horario]
             if frecuencia == 'WEEKLY' and dias:
@@ -653,6 +684,7 @@ class GestorTareasGUI:
             )
             
             if resultado.returncode == 0:
+                eliminar_config_tarea(self._id_de(nombre_completo))
                 self._cargar_tareas()
                 self._mostrar_toast("✅ Tarea eliminada correctamente")
             else:
@@ -660,6 +692,143 @@ class GestorTareasGUI:
         
         except Exception as e:
             messagebox.showerror("❌ Error", f"Error eliminando tarea:\n{e}")
+
+    def _hora_24(self, texto):
+        """Convierte la hora que muestra Windows ('01:00:00 p. m.', '1:00:00 PM' o '13:00:00') a ('13', '00')"""
+        import re
+        coincidencia = re.search(r'(\d{1,2}):(\d{2})', texto or '')
+        if not coincidencia:
+            return '09', '00'
+        hora, minuto = int(coincidencia.group(1)), coincidencia.group(2)
+        marca = re.sub(r'[\s.]', '', (texto or '').lower())
+        if 'pm' in marca and hora < 12:
+            hora += 12
+        elif 'am' in marca and hora == 12:
+            hora = 0
+        return f"{hora:02d}", minuto
+
+    def _construir_pestana_acciones(self, tab, id_de_tarea=None):
+        """Arma la pestaña Acciones del formulario y retorna una función que entrega lo elegido (o None si no es válido)"""
+        config_tarea = obtener_config_tarea(id_de_tarea) if id_de_tarea else None
+        if config_tarea:
+            activos = list(config_tarea.get('modulos', []))
+            destinatarios = config_tarea.get('destinatarios')
+        else:
+            activos = modulos_secuencia_general()
+            destinatarios = None
+
+        nombres = dict(MODULOS_DISPONIBLES)
+        estado = {
+            'orden': [m for m in activos if m in nombres] + [m for m in nombres if m not in activos],
+            'destinatarios': destinatarios
+        }
+        vars_activos = {m: tk.BooleanVar(value=m in activos) for m in nombres}
+
+        tk.Label(tab, text="Acciones que ejecuta esta tarea, en orden", font=("Segoe UI", 10, "bold"),
+                 bg="#f0f0f0").pack(anchor='w', padx=15, pady=(12, 4))
+        contenedor = tk.Frame(tab, bg="#f0f0f0")
+        contenedor.pack(fill='x', padx=15)
+
+        def mover(modulo, direccion):
+            i = estado['orden'].index(modulo)
+            j = i + direccion
+            if 0 <= j < len(estado['orden']):
+                estado['orden'][i], estado['orden'][j] = estado['orden'][j], estado['orden'][i]
+                dibujar()
+
+        def dibujar():
+            for w in contenedor.winfo_children():
+                w.destroy()
+            for modulo in estado['orden']:
+                fila = tk.Frame(contenedor, bg="white", relief='solid', borderwidth=1)
+                fila.pack(fill='x', pady=2)
+                tk.Checkbutton(fila, text=nombres[modulo], variable=vars_activos[modulo], font=("Segoe UI", 10),
+                               bg="white", anchor='w').pack(side='left', padx=8, pady=2, fill='x', expand=True)
+                tk.Button(fila, text="↓", width=3, command=lambda m=modulo: mover(m, 1)).pack(side='right', padx=(0, 6))
+                tk.Button(fila, text="↑", width=3, command=lambda m=modulo: mover(m, -1)).pack(side='right')
+
+        dibujar()
+
+        tk.Label(tab, text="💡 'Publicar Prédica' siempre se ejecuta después de 'Extraer'",
+                 font=("Segoe UI", 8), fg="#1a73e8", bg="#f0f0f0").pack(anchor='w', padx=15, pady=(4, 10))
+        tk.Frame(tab, bg="#ccc", height=1).pack(fill='x', padx=15)
+
+        tk.Label(tab, text="📱 Destinatarios de oraciones", font=("Segoe UI", 10, "bold"),
+                 bg="#f0f0f0").pack(anchor='w', padx=15, pady=(10, 4))
+        var_modo = tk.StringVar(value='propios' if destinatarios else 'defecto')
+        tk.Radiobutton(tab, text="Usar los destinatarios por defecto", variable=var_modo, value='defecto',
+                       bg="#f0f0f0", font=("Segoe UI", 10)).pack(anchor='w', padx=25)
+
+        fila_propios = tk.Frame(tab, bg="#f0f0f0")
+        fila_propios.pack(anchor='w', padx=25, fill='x')
+        tk.Radiobutton(fila_propios, text="Elegir para esta tarea", variable=var_modo, value='propios',
+                       bg="#f0f0f0", font=("Segoe UI", 10)).pack(side='left')
+        lbl_elegidos = tk.Label(fila_propios, font=("Segoe UI", 9), fg="#555", bg="#f0f0f0")
+
+        def actualizar_elegidos():
+            cantidad = len(estado['destinatarios'] or [])
+            lbl_elegidos.config(text=f"{cantidad} elegido(s)" if cantidad else "ninguno elegido")
+
+        def elegir():
+            formulario = tab.winfo_toplevel()
+            elegidos = SelectorDestinatarios.seleccionar(
+                formulario,
+                preseleccion=estado['destinatarios'],
+                titulo="📱 Destinatarios de esta tarea",
+                subtitulo="Solo esta tarea enviará la oración a los que marques"
+            )
+            # El selector libera el bloqueo de la ventana al cerrarse; el formulario lo recupera
+            formulario.grab_set()
+            if elegidos is not None:
+                estado['destinatarios'] = elegidos
+                var_modo.set('propios')
+                actualizar_elegidos()
+
+        tk.Button(fila_propios, text="✅ Elegir…", font=("Segoe UI", 9), bg="#25D366", fg="white",
+                  command=elegir).pack(side='left', padx=(10, 6))
+        lbl_elegidos.pack(side='left')
+        actualizar_elegidos()
+
+        def obtener():
+            modulos = [m for m in estado['orden'] if vars_activos[m].get()]
+            if not modulos:
+                messagebox.showerror("Error", "Marca al menos una acción en la pestaña ⚡ Acciones", parent=tab)
+                return None
+            if 'publicar_predica' in modulos and 'extraer' in modulos:
+                i, j = modulos.index('publicar_predica'), modulos.index('extraer')
+                if i < j:
+                    modulos[i], modulos[j] = modulos[j], modulos[i]
+            usa_propios = var_modo.get() == 'propios'
+            if usa_propios and not estado['destinatarios']:
+                messagebox.showerror("Error", "Elegiste destinatarios propios pero no hay ninguno marcado.\n\n"
+                                     "Presiona '✅ Elegir…' o usa los destinatarios por defecto.", parent=tab)
+                return None
+            return {'modulos': modulos, 'destinatarios': estado['destinatarios'] if usa_propios else None}
+
+        return obtener
+
+    def _id_de(self, nombre):
+        return id_de_nombre_tarea(nombre)
+
+    def _comando_tarea(self, id_de_tarea):
+        """Comando que ejecuta Windows: siempre con --tarea para que nunca se comporte como doble clic"""
+        if self.ruta_exe and os.path.exists(self.ruta_exe):
+            return f'"{self.ruta_exe}" --tarea={id_de_tarea}'
+        directorio_trabajo = os.path.dirname(self.ruta_script)
+        return f'cmd /c "cd /d "{directorio_trabajo}" && py "{self.ruta_script}" --tarea={id_de_tarea}"'
+
+    def _resumen_acciones(self, id_de_tarea):
+        config_tarea = obtener_config_tarea(id_de_tarea)
+        if not config_tarea:
+            return "Secuencia general"
+        cortos = {'biblico': 'Bíblico', 'extraer': 'Extraer', 'publicar_predica': 'Prédica', 'oraciones': 'Oraciones'}
+        partes = []
+        for modulo in config_tarea.get('modulos', []):
+            texto = cortos.get(modulo, modulo)
+            if modulo == 'oraciones' and config_tarea.get('destinatarios'):
+                texto += f" ({len(config_tarea['destinatarios'])})"
+            partes.append(texto)
+        return ", ".join(partes) if partes else "Sin acciones"
 
     def ejecutar(self):
         self.root.mainloop()

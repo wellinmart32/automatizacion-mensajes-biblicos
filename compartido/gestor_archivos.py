@@ -579,6 +579,184 @@ def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
     return resultado
 
 
+MODULOS_DISPONIBLES = [
+    ("biblico",          "▶️  Publicar Mensaje Bíblico en Facebook"),
+    ("extraer",          "🎬  Extraer Predicaciones de WhatsApp"),
+    ("publicar_predica", "📤  Publicar Prédica Extraída en Facebook"),
+    ("oraciones",        "📱  Enviar Oraciones por WhatsApp"),
+]
+
+
+def id_tarea(nombre):
+    """Convierte el nombre de una tarea en un id sin espacios ni acentos, seguro para la línea de comandos"""
+    import re
+    import unicodedata
+    sin_acentos = unicodedata.normalize('NFKD', nombre).encode('ascii', 'ignore').decode('ascii')
+    return re.sub(r'[^A-Za-z0-9]+', '_', sin_acentos).strip('_') or 'Tarea'
+
+
+def _ruta_tareas_programadas():
+    return os.path.join(_base_dir(), 'tareas_programadas.json')
+
+
+def leer_tareas_programadas():
+    """Retorna {id_tarea: config} con la configuración propia de cada tarea automática"""
+    import json
+    ruta = _ruta_tareas_programadas()
+    if not os.path.exists(ruta):
+        return {}
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            return json.load(f).get('tareas', {})
+    except Exception as e:
+        print(f"⚠️  Error leyendo tareas programadas: {e}")
+        return {}
+
+
+def _guardar_tareas_programadas(tareas):
+    import json
+    try:
+        with open(_ruta_tareas_programadas(), 'w', encoding='utf-8') as f:
+            json.dump({'tareas': tareas}, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"⚠️  Error guardando tareas programadas: {e}")
+        return False
+
+
+def obtener_config_tarea(id_de_tarea):
+    """
+    Retorna la configuración de una tarea o None si no tiene.
+
+    Formato: {'nombre': str, 'modulos': [str], 'destinatarios': None | [{'nombre', 'tipo', 'mensaje_asignado'}]}
+    destinatarios None significa usar los destinatarios por defecto.
+    """
+    return leer_tareas_programadas().get(id_de_tarea)
+
+
+def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None):
+    tareas = leer_tareas_programadas()
+    tareas[id_de_tarea] = {
+        'nombre': nombre,
+        'modulos': [m for m in modulos if m in dict(MODULOS_DISPONIBLES)],
+        'destinatarios': destinatarios
+    }
+    return _guardar_tareas_programadas(tareas)
+
+
+def eliminar_config_tarea(id_de_tarea):
+    tareas = leer_tareas_programadas()
+    if id_de_tarea in tareas:
+        del tareas[id_de_tarea]
+        _guardar_tareas_programadas(tareas)
+
+
+PREFIJO_TAREAS = "AutomaPro_MensajesBiblicos"
+
+
+def id_de_nombre_tarea(nombre):
+    """Id en tareas_programadas.json a partir del nombre de la tarea en Windows"""
+    n = nombre[1:] if nombre.startswith('\\') else nombre
+    if n.startswith(PREFIJO_TAREAS + "_"):
+        n = n[len(PREFIJO_TAREAS) + 1:]
+    return id_tarea(n)
+
+
+def modulos_secuencia_general():
+    """Módulos activos de [SECUENCIA] en config_global.txt (lo que hacían las tareas antiguas)"""
+    cfg = configparser.RawConfigParser(delimiters=('=',))
+    cfg.read(os.path.join(_base_dir(), "config_global.txt"), encoding='utf-8')
+    modulos = cfg.get('SECUENCIA', 'modulos_activos', fallback='biblico,extraer,publicar_predica')
+    return [m.strip() for m in modulos.split(',') if m.strip()]
+
+
+def _comando_de_tarea_windows(nombre):
+    """Comando que ejecuta una tarea de Windows, o '' si no se pudo leer"""
+    import subprocess
+    try:
+        resultado = subprocess.run(
+            ['schtasks', '/Query', '/TN', nombre, '/FO', 'LIST', '/V'],
+            capture_output=True, text=True, encoding='cp850', errors='ignore',
+            stdin=subprocess.DEVNULL, timeout=20,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        )
+    except Exception:
+        return ''
+    for linea in resultado.stdout.split('\n'):
+        if ':' in linea:
+            clave, valor = linea.split(':', 1)
+            if 'Tarea que se ejecutar' in clave or 'Task To Run' in clave:
+                return valor.strip()
+    return ''
+
+
+def migrar_tareas_antiguas():
+    """
+    Agrega --tarea al comando de las tareas creadas antes de esta versión, sin tocar sus días ni su hora,
+    para que nunca se ejecuten por el camino del doble clic (que puede quedarse esperando una respuesta).
+    Conserva el ejecutable que ya tenían. Retorna cuántas tareas convirtió.
+    """
+    import subprocess
+    sin_ventana = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+    try:
+        lista = subprocess.run(
+            ['schtasks', '/Query', '/FO', 'CSV', '/NH'],
+            capture_output=True, text=True, encoding='cp850', errors='ignore',
+            stdin=subprocess.DEVNULL, timeout=30, creationflags=sin_ventana
+        )
+    except Exception as e:
+        print(f"⚠️  No se pudieron consultar las tareas: {e}")
+        return 0
+
+    nombres = []
+    for linea in lista.stdout.splitlines():
+        nombre = linea.split('","')[0].strip().strip('"')
+        if PREFIJO_TAREAS in nombre:
+            nombres.append(nombre.split('\\')[-1])
+
+    migradas = 0
+    for nombre in nombres:
+        comando_actual = _comando_de_tarea_windows(nombre)
+        if not comando_actual or '--tarea' in comando_actual:
+            continue
+
+        id_de_tarea = id_de_nombre_tarea(nombre)
+        if comando_actual.lower().startswith('cmd /c') and comando_actual.endswith('"'):
+            comando_nuevo = f'{comando_actual[:-1]} --tarea={id_de_tarea}"'
+        else:
+            comando_nuevo = f'{comando_actual} --tarea={id_de_tarea}'
+
+        try:
+            resultado = subprocess.run(
+                ['schtasks', '/Change', '/TN', nombre, '/TR', comando_nuevo],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                timeout=20, creationflags=sin_ventana
+            )
+        except Exception as e:
+            print(f"⚠️  No se pudo actualizar la tarea {nombre}: {e}")
+            continue
+
+        if resultado.returncode == 0:
+            if not obtener_config_tarea(id_de_tarea):
+                guardar_config_tarea(id_de_tarea, nombre, modulos_secuencia_general())
+            migradas += 1
+        else:
+            print(f"⚠️  No se pudo actualizar la tarea {nombre}: {resultado.stderr.strip()}")
+
+    return migradas
+
+
+def registrar_evento_tarea(id_de_tarea, texto):
+    """Agrega una línea a registro_tareas.log para revisar después qué pasó en una ejecución automática"""
+    linea = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  {id_de_tarea}  {texto}\n"
+    try:
+        with open(os.path.join(_base_dir(), 'registro_tareas.log'), 'a', encoding='utf-8') as f:
+            f.write(linea)
+    except Exception as e:
+        print(f"⚠️  No se pudo escribir en registro_tareas.log: {e}")
+
+
 def obtener_ruta_perfil_navegador():
     """
     Obtiene la ruta del perfil del navegador según configuración

@@ -15,6 +15,10 @@ mensajes_elegidos.json
 # Ignorar destinatarios elegidos para un envío de oraciones (temporal)
 destinatarios_ejecucion.json
 
+# Ignorar configuración propia de cada tarea automática y su registro de ejecuciones
+tareas_programadas.json
+registro_tareas.log
+
 # Ignorar grupos reales de WhatsApp (datos personales)
 # El cliente recibe grupos.ejemplo.json como plantilla
 llamados-oracion/grupos.json

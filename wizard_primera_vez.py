@@ -1205,11 +1205,11 @@ class WizardPrimeraVez:
             if getattr(sys, 'frozen', False):
                 base_dir = os.path.dirname(sys.executable)
                 exe = os.path.join(base_dir, "MensajesBiblicos.exe")
-                comando_tarea = f'"{exe}"'
+                plantilla_comando = f'"{exe}" --tarea={{id}}'
             else:
                 ruta_script = os.path.abspath("publicar_facebook.py")
                 directorio_trabajo = os.path.dirname(ruta_script)
-                comando_tarea = f'cmd /c "cd /d "{directorio_trabajo}" && py "{ruta_script}""'
+                plantilla_comando = f'cmd /c "cd /d "{directorio_trabajo}" && py "{ruta_script}" --tarea={{id}}"'
             
             # Definir las 4 tareas
             tareas = [
@@ -1243,7 +1243,7 @@ class WizardPrimeraVez:
                     'schtasks',
                     '/Create',
                     '/TN', tarea['nombre'],
-                    '/TR', comando_tarea,
+                    '/TR', plantilla_comando.format(id=tarea['nombre'][len(prefijo) + 1:]),
                     '/SC', 'WEEKLY',
                     '/D', tarea['dias'],
                     '/ST', tarea['hora'],
