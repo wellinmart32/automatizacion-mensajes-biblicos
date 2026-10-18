@@ -429,8 +429,9 @@ class ConfiguradorGUI:
             notebook.add(tab_seq, text="⚡ Secuencia")
 
             tk.Label(tab_seq,
-                text="Define qué módulos se ejecutan y en qué orden al usar 'Ejecutar Secuencia'",
-                font=("Segoe UI", 9), bg="#f0f0f0", fg="#555", wraplength=560
+                text="Define qué módulos se ejecutan y en qué orden al usar 'Ejecutar Secuencia'. "
+                     "También es el valor inicial de las tareas automáticas nuevas; cada tarea guarda después sus propias acciones.",
+                font=("Segoe UI", 9), bg="#f0f0f0", fg="#555", wraplength=560, justify='left'
             ).pack(anchor='w', padx=20, pady=(10, 0))
 
             banner_seq = tk.Frame(tab_seq, bg="#e3f2fd", pady=6)
@@ -526,7 +527,9 @@ class ConfiguradorGUI:
         self._radio_si_no(tab_adv, self.var_forzar_manual)
 
         # Navegar a pestaña inicial si viene del panel
-        if self.pestana_inicial == 'oraciones':
+        if self.pestana_inicial == 'extractor':
+            notebook.select(tab_pred)
+        elif self.pestana_inicial == 'oraciones':
             notebook.select(3)
         elif self.pestana_inicial == 'secuencia' and self.es_full:
             notebook.select(4)
