@@ -509,6 +509,12 @@ class WizardPrimeraVez:
             frame_nav, text="Chrome",
             variable=self.var_navegador, value="chrome",
             bg="#f0f0f0", font=("Segoe UI", 10)
+        ).pack(side='left', padx=(0, 20))
+
+        tk.Radiobutton(
+            frame_nav, text="Edge",
+            variable=self.var_navegador, value="edge",
+            bg="#f0f0f0", font=("Segoe UI", 10)
         ).pack(side='left')
 
         tk.Label(

@@ -65,12 +65,12 @@ class PublicadorWhatsAppOracion:
                 # Primero busca config específica de oraciones
                 if config.has_option('ORACIONES', 'navegador'):
                     nav = config['ORACIONES']['navegador'].split('#')[0].strip()
-                    if nav in ['firefox', 'chrome']:
+                    if nav in ['firefox', 'chrome', 'edge']:
                         return nav
                 # Fallback a navegador general
                 if config.has_option('GENERAL', 'navegador'):
                     nav = config['GENERAL']['navegador'].split('#')[0].strip()
-                    if nav in ['firefox', 'chrome']:
+                    if nav in ['firefox', 'chrome', 'edge']:
                         return nav
         except Exception as e:
             print(f"   ⚠️  Error leyendo config navegador: {e}")
@@ -167,17 +167,27 @@ class PublicadorWhatsAppOracion:
         try:
             usar_perfil = self._leer_usar_perfil_config()
 
-            if self.navegador == 'chrome':
-                opciones = ChromeOptions()
+            if self.navegador in ('chrome', 'edge'):
+                if self.navegador == 'edge':
+                    # Microsoft cerró el servidor antiguo de msedgedriver; versiones viejas de Selenium Manager lo seguían usando
+                    os.environ.setdefault("SE_DRIVER_MIRROR_URL", "https://msedgedriver.microsoft.com")
+                    from selenium.webdriver.edge.options import Options as EdgeOptions
+                    opciones = EdgeOptions()
+                    clase_driver, nombre = webdriver.Edge, 'Edge'
+                else:
+                    opciones = ChromeOptions()
+                    clase_driver, nombre = webdriver.Chrome, 'Chrome'
                 opciones.add_argument("--disable-blink-features=AutomationControlled")
-                opciones.add_experimental_option("excludeSwitches", ["enable-automation"])
+                # enable-logging y log-level evitan que el navegador llene la consola con mensajes internos
+                opciones.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+                opciones.add_argument("--log-level=3")
 
-                perfil_dedicado = os.path.join(self.base_dir, "perfiles", "whatsapp_chrome_compartido")
+                perfil_dedicado = os.path.join(self.base_dir, "perfiles", f"whatsapp_{self.navegador}_compartido")
                 os.makedirs(perfil_dedicado, exist_ok=True)
                 opciones.add_argument(f"--user-data-dir={perfil_dedicado}")
-                print(f"   ✓ Usando perfil Chrome dedicado: {perfil_dedicado}")
+                print(f"   ✓ Usando perfil {nombre} dedicado: {perfil_dedicado}")
 
-                self.driver = webdriver.Chrome(options=opciones)
+                self.driver = clase_driver(options=opciones)
             else:
                 import subprocess as _sp
                 try:

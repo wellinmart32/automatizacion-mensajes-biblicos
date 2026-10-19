@@ -1064,7 +1064,7 @@ class PanelControl:
              "▶️ PUBLICAR MENSAJE BÍBLICO EN FACEBOOK\n\n"
              "Publica automáticamente mensajes bíblicos en tu página o perfil de Facebook.\n\n"
              "¿Qué hace?\n"
-             "• Abre el navegador configurado (Firefox o Chrome)\n"
+             "• Abre el navegador configurado (Firefox, Chrome o Edge)\n"
              "• Inicia sesión usando tu perfil guardado\n"
              "• Elige los mensajes de tu carpeta 'mensajes/' según el modo configurado\n"
              "• Publica la cantidad configurada (1 por defecto), esperando el tiempo mínimo entre cada uno\n"

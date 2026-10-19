@@ -33,8 +33,8 @@ class PublicadorFacebook:
         print(f"{N}🌐 Iniciando {navegador.upper()}...{X}")
         if navegador == 'firefox':
             self._iniciar_firefox()
-        elif navegador == 'chrome':
-            self._iniciar_chrome()
+        elif navegador in ('chrome', 'edge'):
+            self._iniciar_chromium(navegador)
         else:
             raise Exception(f"Navegador no soportado: {navegador}")
         self.wait = WebDriverWait(self.driver, 20)
@@ -85,17 +85,31 @@ class PublicadorFacebook:
         print(f"   ✓ Usando perfil dedicado: {perfil_fallback}")
         self.driver = webdriver.Firefox(options=opciones)
 
-    def _iniciar_chrome(self):
+    def _iniciar_chromium(self, navegador):
+        """Chrome y Edge comparten motor (Chromium): misma lógica, distinta clase de Selenium"""
         import sys
         import subprocess
         import tempfile
 
+        if navegador == 'edge':
+            # Microsoft cerró el servidor antiguo de msedgedriver; versiones viejas de Selenium Manager lo seguían usando
+            os.environ.setdefault("SE_DRIVER_MIRROR_URL", "https://msedgedriver.microsoft.com")
+            from selenium.webdriver.edge.options import Options as OpcionesNavegador
+            clase_driver = webdriver.Edge
+            proceso, nombre = 'msedge.exe', 'Edge'
+        else:
+            OpcionesNavegador = ChromeOptions
+            clase_driver = webdriver.Chrome
+            proceso, nombre = 'chrome.exe', 'Chrome'
+
         def _opciones_base():
-            op = ChromeOptions()
+            op = OpcionesNavegador()
             if self.config['desactivar_notificaciones']:
                 op.add_argument("--disable-notifications")
             op.add_argument("--disable-blink-features=AutomationControlled")
-            op.add_experimental_option("excludeSwitches", ["enable-automation"])
+            # enable-logging y log-level evitan que el navegador llene la consola con mensajes internos
+            op.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+            op.add_argument("--log-level=3")
             op.add_experimental_option('useAutomationExtension', False)
             op.add_argument("--no-first-run")
             op.add_argument("--no-default-browser-check")
@@ -108,38 +122,38 @@ class PublicadorFacebook:
             })
             return op
 
-        # Detectar si Chrome ya está corriendo
+        # Detectar si el navegador ya está corriendo
         try:
             resultado = subprocess.run(
-                ['tasklist', '/FI', 'IMAGENAME eq chrome.exe', '/NH'],
+                ['tasklist', '/FI', f'IMAGENAME eq {proceso}', '/NH'],
                 capture_output=True, text=True
             )
-            chrome_ya_abierto = 'chrome.exe' in resultado.stdout.lower()
+            ya_abierto = proceso in resultado.stdout.lower()
         except Exception:
-            chrome_ya_abierto = False
+            ya_abierto = False
 
         base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        perfil_dedicado = os.path.join(base_dir, "perfiles", "chrome_facebook")
+        perfil_dedicado = os.path.join(base_dir, "perfiles", f"{navegador}_facebook")
         os.makedirs(perfil_dedicado, exist_ok=True)
 
         usar_perfil = self.config.get('usar_perfil_existente', True)
 
-        if chrome_ya_abierto:
-            print(f"   ℹ️  Chrome ya está abierto, iniciando instancia separada con perfil dedicado...")
+        if ya_abierto:
+            print(f"   ℹ️  {nombre} ya está abierto, iniciando instancia separada con perfil dedicado...")
 
         if usar_perfil:
             opciones = _opciones_base()
             opciones.add_argument(f"--user-data-dir={perfil_dedicado}")
             try:
-                self.driver = webdriver.Chrome(options=opciones)
+                self.driver = clase_driver(options=opciones)
                 return
             except Exception as e:
-                print(f"   ⚠️  Perfil dedicado bloqueado ({e}), usando perfil temporal...")
+                print(f"   ⚠️  No se pudo abrir con el perfil dedicado ({e}), usando perfil temporal...")
 
-        perfil_tmp = tempfile.mkdtemp(prefix="chrome_fb_tmp_")
+        perfil_tmp = tempfile.mkdtemp(prefix=f"{navegador}_fb_tmp_")
         opciones = _opciones_base()
         opciones.add_argument(f"--user-data-dir={perfil_tmp}")
-        self.driver = webdriver.Chrome(options=opciones)
+        self.driver = clase_driver(options=opciones)
 
     @staticmethod
     def _notificar_login(titulo, mensaje):

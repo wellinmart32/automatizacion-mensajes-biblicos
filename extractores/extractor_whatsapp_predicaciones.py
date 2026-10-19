@@ -120,38 +120,48 @@ class ExtractorWhatsAppPredicaciones:
         print(f"🌐 Iniciando {navegador.capitalize()} para WhatsApp Web...")
 
         try:
-            if navegador == 'chrome':
+            if navegador in ('chrome', 'edge'):
                 import subprocess as _sp
-                from selenium.webdriver.chrome.options import Options as ChromeOptions
+                if navegador == 'edge':
+                    # Microsoft cerró el servidor antiguo de msedgedriver; versiones viejas de Selenium Manager lo seguían usando
+                    os.environ.setdefault("SE_DRIVER_MIRROR_URL", "https://msedgedriver.microsoft.com")
+                    from selenium.webdriver.edge.options import Options as OpcionesNavegador
+                    clase_driver, proceso, nombre = webdriver.Edge, 'msedge.exe', 'Edge'
+                else:
+                    from selenium.webdriver.chrome.options import Options as OpcionesNavegador
+                    clase_driver, proceso, nombre = webdriver.Chrome, 'chrome.exe', 'Chrome'
                 try:
-                    _r = _sp.run(['tasklist', '/FI', 'IMAGENAME eq chrome.exe', '/NH'], capture_output=True, text=True)
-                    chrome_ya_abierto = 'chrome.exe' in _r.stdout.lower()
+                    _r = _sp.run(['tasklist', '/FI', f'IMAGENAME eq {proceso}', '/NH'], capture_output=True, text=True)
+                    ya_abierto = proceso in _r.stdout.lower()
                 except Exception:
-                    chrome_ya_abierto = False
+                    ya_abierto = False
 
-                if chrome_ya_abierto:
-                    print(f"   ℹ️  Chrome ya está abierto, usando instancia separada...")
+                if ya_abierto:
+                    print(f"   ℹ️  {nombre} ya está abierto, usando instancia separada...")
 
-                perfil_dedicado = os.path.join(self.base_dir, "perfiles", "whatsapp_chrome_compartido")
+                perfil_dedicado = os.path.join(self.base_dir, "perfiles", f"whatsapp_{navegador}_compartido")
                 os.makedirs(perfil_dedicado, exist_ok=True)
 
-                opciones = ChromeOptions()
+                opciones = OpcionesNavegador()
                 opciones.add_argument("--disable-blink-features=AutomationControlled")
-                opciones.add_experimental_option("excludeSwitches", ["enable-automation"])
+                # enable-logging y log-level evitan que el navegador llene la consola con mensajes internos
+                opciones.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+                opciones.add_argument("--log-level=3")
                 opciones.add_argument(f"--user-data-dir={perfil_dedicado}")
-                print(f"   ✓ Usando perfil Chrome dedicado: {perfil_dedicado}")
+                print(f"   ✓ Usando perfil {nombre} dedicado: {perfil_dedicado}")
 
                 try:
-                    self.driver = webdriver.Chrome(options=opciones)
+                    self.driver = clase_driver(options=opciones)
                 except Exception as e:
                     print(f"   ⚠️  Perfil bloqueado ({e}), usando perfil temporal...")
                     import tempfile
-                    perfil_tmp = tempfile.mkdtemp(prefix="chrome_wp_tmp_")
-                    opciones2 = ChromeOptions()
+                    perfil_tmp = tempfile.mkdtemp(prefix=f"{navegador}_wp_tmp_")
+                    opciones2 = OpcionesNavegador()
                     opciones2.add_argument("--disable-blink-features=AutomationControlled")
-                    opciones2.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    opciones2.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+                    opciones2.add_argument("--log-level=3")
                     opciones2.add_argument(f"--user-data-dir={perfil_tmp}")
-                    self.driver = webdriver.Chrome(options=opciones2)
+                    self.driver = clase_driver(options=opciones2)
             else:
                 import subprocess as _sp
                 try:

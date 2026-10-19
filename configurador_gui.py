@@ -219,7 +219,7 @@ class ConfiguradorGUI:
     def _radio_navegador(self, parent, variable):
         frame = tk.Frame(parent, bg="#f0f0f0")
         frame.pack(anchor='w', padx=20, pady=(0, 12))
-        for opcion in ['firefox', 'chrome']:
+        for opcion in ['firefox', 'chrome', 'edge']:
             tk.Radiobutton(frame, text=opcion.capitalize(), variable=variable, value=opcion, bg="#f0f0f0", font=("Segoe UI", 10)).pack(side='left', padx=8)
 
     def _construir_ui(self):
@@ -358,7 +358,7 @@ class ConfiguradorGUI:
         self.var_nav_predicaciones = tk.StringVar(value=self._get('PREDICACIONES', 'navegador', 'firefox'))
         frame_nav_pred = tk.Frame(tab_pred, bg="#f0f0f0")
         frame_nav_pred.pack(anchor='w', padx=20)
-        for val, lbl in [('firefox', 'Firefox'), ('chrome', 'Chrome')]:
+        for val, lbl in [('firefox', 'Firefox'), ('chrome', 'Chrome'), ('edge', 'Edge')]:
             tk.Radiobutton(frame_nav_pred, text=lbl, variable=self.var_nav_predicaciones, value=val,
                            bg="#f0f0f0", font=("Segoe UI", 10),
                            state='normal' if self.es_full else 'disabled').pack(side='left', padx=(0, 15))
@@ -387,7 +387,7 @@ class ConfiguradorGUI:
         self.var_nav_oraciones = tk.StringVar(value=self._get('ORACIONES', 'navegador', 'firefox'))
         frame_nav_ora = tk.Frame(tab_ora, bg="#f0f0f0")
         frame_nav_ora.pack(anchor='w', padx=20)
-        for val, lbl in [('firefox', 'Firefox'), ('chrome', 'Chrome')]:
+        for val, lbl in [('firefox', 'Firefox'), ('chrome', 'Chrome'), ('edge', 'Edge')]:
             tk.Radiobutton(frame_nav_ora, text=lbl, variable=self.var_nav_oraciones, value=val,
                            bg="#f0f0f0", font=("Segoe UI", 10),
                            state='normal' if self.es_full else 'disabled').pack(side='left', padx=(0, 15))
