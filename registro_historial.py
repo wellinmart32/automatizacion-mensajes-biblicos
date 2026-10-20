@@ -5,6 +5,7 @@ Se integra con el publicador de Facebook para registrar URLs publicadas
 
 import os
 import json
+import sys
 from datetime import datetime
 
 
@@ -15,8 +16,14 @@ class RegistroHistorialPredicaciones:
     """
     
     def __init__(self):
-        self.archivo_historial = "cola-facebook/historial_publicados.json"
-        self.carpeta_publicados = "cola-facebook/publicados"
+        if getattr(sys, 'frozen', False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        # Rutas absolutas: las tareas programadas arrancan en C:\Windows\System32, no en la carpeta del programa
+        self.base_dir = base
+        self.archivo_historial = os.path.join(base, "cola-facebook", "historial_publicados.json")
+        self.carpeta_publicados = os.path.join(base, "cola-facebook", "publicados")
         
         # Asegurar que existe la carpeta
         os.makedirs(os.path.dirname(self.archivo_historial), exist_ok=True)
@@ -62,8 +69,8 @@ class RegistroHistorialPredicaciones:
         try:
             # Si no se proporciona URL, leerla del archivo
             if not url_publicada:
-                ruta_pendiente = os.path.join("cola-facebook/pendientes", archivo_predica)
-                ruta_publicado = os.path.join("cola-facebook/publicados", archivo_predica)
+                ruta_pendiente = os.path.join(self.base_dir, "cola-facebook", "pendientes", archivo_predica)
+                ruta_publicado = os.path.join(self.base_dir, "cola-facebook", "publicados", archivo_predica)
                 
                 # Intentar leer de pendientes o publicados
                 if os.path.exists(ruta_pendiente):
