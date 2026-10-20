@@ -28,7 +28,10 @@ class PanelControl:
 
         try:
             base_ico = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            self.root.iconbitmap(os.path.join(base_ico, 'iconos', 'dashboard.ico'))
+            ico = os.path.join(base_ico, 'iconos', 'dashboard.ico')
+            self.root.iconbitmap(ico)
+            # default= hace que las subventanas (Toplevel) hereden el ícono en vez de la pluma de Tkinter
+            self.root.iconbitmap(default=ico)
         except Exception:
             pass
 
@@ -135,10 +138,10 @@ class PanelControl:
             if resultado.get('hay_actualizacion'):
                 version_nueva = resultado.get('version_nueva')
                 ruta_archivo = resultado.get('ruta_archivo', '')
-                self.root.after(0, lambda: self._mostrar_ventana_actualizacion(version_nueva, ruta_archivo))
+                self.root.after(0, lambda: self._mostrar_ventana_actualizacion(version_local, version_nueva, ruta_archivo))
         threading.Thread(target=consultar, daemon=True).start()
 
-    def _mostrar_ventana_actualizacion(self, version_nueva, ruta_archivo):
+    def _mostrar_ventana_actualizacion(self, version_local, version_nueva, ruta_archivo):
         """Muestra ventana modal de actualización disponible"""
         import tkinter as tk
         from tkinter import ttk
@@ -178,7 +181,7 @@ class PanelControl:
         cuerpo = tk.Frame(ventana, bg="#f0f0f0", padx=30, pady=15)
         cuerpo.pack(fill='both', expand=True)
 
-        tk.Label(cuerpo, text=f"Versión actual:      1.0.0", font=("Segoe UI", 10), bg="#f0f0f0", anchor='w').pack(fill='x')
+        tk.Label(cuerpo, text=f"Versión actual:      {version_local}", font=("Segoe UI", 10), bg="#f0f0f0", anchor='w').pack(fill='x')
         tk.Label(cuerpo, text=f"Nueva versión:       {version_nueva}", font=("Segoe UI", 10, "bold"), bg="#f0f0f0", fg="#1a73e8", anchor='w').pack(fill='x', pady=(0, 10))
         tk.Label(
             cuerpo,

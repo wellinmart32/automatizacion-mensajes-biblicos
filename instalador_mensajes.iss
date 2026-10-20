@@ -1,6 +1,6 @@
 [Setup]
 AppName=Mensajes Biblicos AutoPro
-AppVersion=1.0.0
+AppVersion=1.1.0
 AppPublisher=AutomaPro
 AppPublisherURL=https://automapro.com
 DefaultDirName={userdocs}\AutomaPro\MensajesBiblicos
@@ -27,11 +27,11 @@ Source: "dist\PanelControl.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\ExtractorPredicaciones.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\GestorMensajes.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\GestorTareasMensajes.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "config_global.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "config_global.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "compartido\*"; DestDir: "{app}\compartido"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "publicadores\*"; DestDir: "{app}\publicadores"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "mensajes\*"; DestDir: "{app}\mensajes"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "mensajes\*"; DestDir: "{app}\mensajes"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
 
 [Dirs]
 Name: "{app}\mensajes"

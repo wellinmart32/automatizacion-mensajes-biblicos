@@ -38,6 +38,8 @@ class GestorTareasGUI:
         try:
             base_ico = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
             self.root.iconbitmap(os.path.join(base_ico, 'iconos', 'calendar.ico'))
+            # default= hace que las subventanas (Toplevel) hereden el ícono en vez de la pluma de Tkinter
+            self.root.iconbitmap(default=os.path.join(base_ico, 'iconos', 'calendar.ico'))
         except Exception:
             pass
 

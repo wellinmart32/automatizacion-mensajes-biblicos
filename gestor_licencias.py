@@ -114,7 +114,7 @@ class GestorLicencias:
                 datos = respuesta.json()
                 version_nueva = datos.get('version', version_actual)
                 url_descarga = datos.get('rutaArchivo', '')
-                hay_actualizacion = version_nueva != version_actual and version_nueva != ''
+                hay_actualizacion = self._es_version_mayor(version_nueva, version_actual)
                 return {
                     'hay_actualizacion': hay_actualizacion,
                     'version_actual': version_actual,
@@ -123,8 +123,23 @@ class GestorLicencias:
                     'ruta_archivo': url_descarga
                 }
         except Exception as e:
-            print(f"⚠️  Error en verificar_actualizacion: {e}")
+            print(f"ℹ️  No se pudo consultar actualizaciones, se intentará la próxima vez ({type(e).__name__})")
         return {'hay_actualizacion': False}
+
+    @staticmethod
+    def _es_version_mayor(nueva, actual):
+        """Compara por números: 1.10.0 es mayor que 1.9.2, y 1.0.2 no es mayor que 1.1.0"""
+        def partes(version):
+            try:
+                numeros = [int(p) for p in str(version).strip().split('.')]
+            except ValueError:
+                return None
+            return tuple(numeros + [0] * (3 - len(numeros)))
+
+        n, a = partes(nueva), partes(actual)
+        if n is None or a is None:
+            return False
+        return n > a
 
     def obtener_codigo_guardado(self):
         """Obtiene el código de licencia guardado localmente"""

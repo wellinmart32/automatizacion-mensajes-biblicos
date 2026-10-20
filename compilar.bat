@@ -20,7 +20,7 @@ set FLAGS_CONSOLA=--onefile --noconfirm
 
 echo.
 echo [1/8] Compilando MensajesBiblicos.exe...
-%PYINSTALLER% %FLAGS_CONSOLA% %DATOS_BASE% --add-data "publicadores;publicadores" --add-data "extractores;extractores" --add-data "mensajes;mensajes" --add-data "llamados-oracion;llamados-oracion" --icon=iconos/dashboard.ico --name MensajesBiblicos publicar_facebook.py
+%PYINSTALLER% %FLAGS_CONSOLA% %DATOS_BASE% --add-data "publicadores;publicadores" --add-data "extractores;extractores" --add-data "mensajes;mensajes" --add-data "llamados-oracion;llamados-oracion" --icon=iconos/bible.ico --name MensajesBiblicos publicar_facebook.py
 echo.
 
 echo [2/8] Compilando PanelControl.exe...
@@ -48,7 +48,7 @@ echo [7/8] Compilando OracionesWhatsApp.exe...
 echo.
 
 echo [8/8] Compilando ExtractorPredicaciones.exe...
-%PYINSTALLER% %FLAGS% %DATOS_BASE% --add-data "extractores;extractores" --add-data "cola-facebook;cola-facebook" --icon=iconos/edit.ico --name ExtractorPredicaciones extractores/extractor_whatsapp_predicaciones.py
+%PYINSTALLER% %FLAGS% %DATOS_BASE% --add-data "extractores;extractores" --add-data "cola-facebook;cola-facebook" --icon=iconos/clapper.ico --name ExtractorPredicaciones extractores/extractor_whatsapp_predicaciones.py
 echo.
 
 echo ============================================================

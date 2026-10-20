@@ -46,7 +46,10 @@ class ConfiguradorGUI:
 
         try:
             base_ico = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            self.root.iconbitmap(os.path.join(base_ico, 'iconos', 'settings.ico'))
+            ico = os.path.join(base_ico, 'iconos', 'settings.ico')
+            self.root.iconbitmap(ico)
+            # default= hace que las subventanas (Toplevel) hereden el ícono en vez de la pluma de Tkinter
+            self.root.iconbitmap(default=ico)
         except Exception:
             pass
 
