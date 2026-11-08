@@ -31,7 +31,7 @@ Source: "config_global.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "compartido\*"; DestDir: "{app}\compartido"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "publicadores\*"; DestDir: "{app}\publicadores"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "mensajes\*"; DestDir: "{app}\mensajes"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
+Source: "mensajes\*"; DestDir: "{app}\mensajes"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Check: EsInstalacionNueva
 
 [Dirs]
 Name: "{app}\mensajes"
@@ -45,4 +45,20 @@ Name: "{autodesktop}\Mensajes Biblicos"; Filename: "{app}\MensajesBiblicos.exe";
 Name: "{autodesktop}\Panel de Control MB"; Filename: "{app}\PanelControl.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\WizardMensajes.exe"; Description: "Configurar Mensajes Biblicos"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\WizardMensajes.exe"; Description: "Configurar Mensajes Biblicos"; Flags: nowait postinstall skipifsilent; Check: EsInstalacionNueva
+
+[Code]
+var
+  InstalacionNueva: Boolean;
+
+// Se evalúa antes de copiar archivos: si ya hay configuración, es una actualización y no se tocan los datos del cliente
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    InstalacionNueva := not FileExists(ExpandConstant('{app}\config_global.txt'));
+end;
+
+function EsInstalacionNueva: Boolean;
+begin
+  Result := InstalacionNueva;
+end;
