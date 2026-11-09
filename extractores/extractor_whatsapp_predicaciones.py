@@ -51,6 +51,22 @@ class ExtractorWhatsAppPredicaciones:
         os.makedirs(self.carpeta_pendientes, exist_ok=True)
         os.makedirs(self.carpeta_publicados, exist_ok=True)
     
+    def urls_ya_conocidas(self):
+        """URLs que no se deben volver a extraer: historial, publicados y pendientes"""
+        # El historial pudo quedar incompleto en versiones anteriores; las carpetas son la fuente confiable
+        urls = set(self.cargar_historial().get("urls_publicadas", []))
+        for carpeta in [self.carpeta_publicados, self.carpeta_pendientes]:
+            for archivo in os.listdir(carpeta):
+                if archivo.startswith('predica-') and archivo.endswith('.txt'):
+                    try:
+                        with open(os.path.join(carpeta, archivo), 'r', encoding='utf-8') as f:
+                            url = f.read().strip()
+                        if url.startswith('http'):
+                            urls.add(url)
+                    except Exception:
+                        pass
+        return urls
+
     def cargar_historial(self):
         """Carga el historial de predicaciones publicadas"""
         if os.path.exists(self.archivo_historial):
@@ -418,9 +434,8 @@ class ExtractorWhatsAppPredicaciones:
         print(f"{N}{C}" + "="*70 + X + "\n")
         
         # Cargar historial de publicadas
-        historial = self.cargar_historial()
-        urls_publicadas = set(historial["urls_publicadas"])
-        print(f"📚 Historial cargado: {len(urls_publicadas)} predicaciones ya publicadas\n")
+        urls_publicadas = self.urls_ya_conocidas()
+        print(f"📚 Historial cargado: {len(urls_publicadas)} predicaciones ya publicadas o en cola\n")
         
         try:
             contenedor_chat = self.driver.find_element(By.ID, "main")

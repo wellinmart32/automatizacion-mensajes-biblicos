@@ -199,10 +199,52 @@ def obtener_siguiente_predicacion():
         return None, None
 
     archivos.sort()
-    archivo_siguiente = archivos[0]
-    ruta_completa = os.path.join(carpeta, archivo_siguiente)
+    ya_publicadas = _urls_predicas_publicadas()
+    vistas = set()
 
-    return ruta_completa, archivo_siguiente
+    for archivo in archivos:
+        ruta_completa = os.path.join(carpeta, archivo)
+        try:
+            with open(ruta_completa, 'r', encoding='utf-8') as f:
+                url = f.read().strip()
+        except Exception:
+            url = ''
+
+        # Versiones anteriores podían dejar en cola prédicas ya publicadas o repetidas
+        if url and (url in ya_publicadas or url in vistas):
+            print(f"   ⏭️  {archivo} ya fue publicada antes, se descarta sin publicar")
+            mover_predicacion_a_publicados(archivo)
+            continue
+
+        vistas.add(url)
+        return ruta_completa, archivo
+
+    return None, None
+
+
+def _urls_predicas_publicadas():
+    """URLs de prédicas ya publicadas según el historial y la carpeta publicados"""
+    import json
+    base = _base_dir()
+    urls = set()
+
+    try:
+        with open(os.path.join(base, 'cola-facebook', 'historial_publicados.json'), 'r', encoding='utf-8') as f:
+            urls.update(json.load(f).get('urls_publicadas', []))
+    except Exception:
+        pass
+
+    carpeta = os.path.join(base, 'cola-facebook', 'publicados')
+    if os.path.exists(carpeta):
+        for archivo in os.listdir(carpeta):
+            if archivo.startswith('predica-') and archivo.endswith('.txt'):
+                try:
+                    with open(os.path.join(carpeta, archivo), 'r', encoding='utf-8') as f:
+                        urls.add(f.read().strip())
+                except Exception:
+                    pass
+
+    return urls
 
 
 def mover_predicacion_a_publicados(nombre_archivo):
