@@ -613,7 +613,7 @@ class GestorTareasGUI:
                 nombre_completo = n if n.startswith(self.prefijo_tarea) else f"{self.prefijo_tarea}_{n}"
                 subprocess.run(['schtasks', '/Delete', '/TN', nombre_completo, '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
-            guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'])
+            guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'], acciones['cantidad'])
             ventana.destroy()
             self._crear_tarea_windows(nombre, frecuencia, horario, dias_selec if frecuencia == "WEEKLY" else None, mostrar_aviso_hora)
             
@@ -715,9 +715,11 @@ class GestorTareasGUI:
         if config_tarea:
             activos = list(config_tarea.get('modulos', []))
             destinatarios = config_tarea.get('destinatarios')
+            cantidad = config_tarea.get('cantidad')
         else:
             activos = modulos_secuencia_general()
             destinatarios = None
+            cantidad = None
 
         nombres = dict(MODULOS_DISPONIBLES)
         estado = {
@@ -750,6 +752,15 @@ class GestorTareasGUI:
                 tk.Button(fila, text="↑", width=3, command=lambda m=modulo: mover(m, -1)).pack(side='right')
 
         dibujar()
+
+        opcion_general = "Usar la configuración general"
+        fila_cantidad = tk.Frame(tab, bg="#f0f0f0")
+        fila_cantidad.pack(anchor='w', padx=15, pady=(8, 0))
+        tk.Label(fila_cantidad, text="📖 Mensajes bíblicos a publicar:", font=("Segoe UI", 10),
+                 bg="#f0f0f0").pack(side='left')
+        var_cantidad = tk.StringVar(value=str(cantidad) if cantidad else opcion_general)
+        ttk.Combobox(fila_cantidad, textvariable=var_cantidad, values=[opcion_general] + [str(n) for n in range(1, 11)],
+                     state='readonly', width=28, font=("Segoe UI", 9)).pack(side='left', padx=(8, 0))
 
         tk.Label(tab, text="💡 'Publicar Prédica' siempre se ejecuta después de 'Extraer'",
                  font=("Segoe UI", 8), fg="#1a73e8", bg="#f0f0f0").pack(anchor='w', padx=15, pady=(4, 10))
@@ -805,7 +816,11 @@ class GestorTareasGUI:
                 messagebox.showerror("Error", "Elegiste destinatarios propios pero no hay ninguno marcado.\n\n"
                                      "Presiona '✅ Elegir…' o usa los destinatarios por defecto.", parent=tab)
                 return None
-            return {'modulos': modulos, 'destinatarios': estado['destinatarios'] if usa_propios else None}
+            return {
+                'modulos': modulos,
+                'destinatarios': estado['destinatarios'] if usa_propios else None,
+                'cantidad': None if var_cantidad.get() == opcion_general else int(var_cantidad.get())
+            }
 
         return obtener
 
@@ -827,6 +842,8 @@ class GestorTareasGUI:
         partes = []
         for modulo in config_tarea.get('modulos', []):
             texto = cortos.get(modulo, modulo)
+            if modulo == 'biblico' and config_tarea.get('cantidad'):
+                texto += f" ({config_tarea['cantidad']})"
             if modulo == 'oraciones' and config_tarea.get('destinatarios'):
                 texto += f" ({len(config_tarea['destinatarios'])})"
             partes.append(texto)

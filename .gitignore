@@ -18,6 +18,7 @@ destinatarios_ejecucion.json
 # Ignorar configuración propia de cada tarea automática y su registro de ejecuciones
 tareas_programadas.json
 registro_tareas.log
+aviso_actualizacion.json
 
 # Ignorar grupos reales de WhatsApp (datos personales)
 # El cliente recibe grupos.ejemplo.json como plantilla

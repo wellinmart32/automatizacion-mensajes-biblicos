@@ -356,11 +356,18 @@ def _ejecutar_tarea(config, id_de_tarea):
 
     modulos = config_tarea.get('modulos', [])
     destinatarios = config_tarea.get('destinatarios')
+    cantidad = config_tarea.get('cantidad')
     nombres = dict(MODULOS_DISPONIBLES)
+    if cantidad:
+        # Copia para no alterar la configuración general que usan los demás módulos
+        config = dict(config)
+        config['cantidad_por_ejecucion'] = cantidad
 
     print(f"\n{N}{C}🗓️  TAREA AUTOMÁTICA: {config_tarea.get('nombre', id_de_tarea)}{X}")
     for i, modulo in enumerate(modulos, 1):
         print(f"   {i}. {nombres.get(modulo, modulo)}")
+    if 'biblico' in modulos:
+        print(f"   📖 Mensajes bíblicos: {f'{cantidad} propios de la tarea' if cantidad else 'los de la configuración general'}")
     if 'oraciones' in modulos:
         print(f"   📱 Destinatarios: {f'{len(destinatarios)} propios de la tarea' if destinatarios else 'los de por defecto'}")
 
@@ -478,6 +485,65 @@ def _abrir_consola():
         pass
 
 
+def _avisar_actualizacion(id_de_tarea):
+    """Al terminar una tarea avisa si hay versión nueva: como máximo una vez al día y sin bloquear la tarea"""
+    import json
+    base_dir = _base_dir_app()
+    ruta_aviso = os.path.join(base_dir, 'aviso_actualizacion.json')
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    try:
+        with open(ruta_aviso, 'r', encoding='utf-8') as f:
+            if json.load(f).get('fecha') == hoy:
+                return
+    except Exception:
+        pass
+
+    try:
+        with open(os.path.join(base_dir, 'version.txt'), 'r', encoding='utf-8') as f:
+            version_local = f.read().strip()
+    except Exception:
+        return
+
+    resultado = GestorLicencias("MensajesBiblicos").verificar_actualizacion(version_local)
+    if not resultado.get('hay_actualizacion') or not resultado.get('ruta_archivo'):
+        return
+
+    version_nueva = resultado['version_nueva']
+    try:
+        with open(ruta_aviso, 'w', encoding='utf-8') as f:
+            json.dump({'fecha': hoy, 'version': version_nueva}, f)
+    except Exception:
+        pass
+
+    from compartido.aviso_temporizado import AvisoTemporizado
+    clave, _ = AvisoTemporizado.preguntar(
+        f"🔄 Hay una nueva versión de Mensajes Bíblicos ({version_nueva})",
+        f"Tienes la {version_local}. Al actualizar se conservan tus mensajes, tu configuración y tus tareas.",
+        [('actualizar', '⬇️ Actualizar ahora'), ('despues', 'Más tarde')],
+        'despues',
+        color=AvisoTemporizado.COLOR_INFO
+    )
+
+    if clave != 'actualizar':
+        print(f"\nℹ️  Hay una nueva versión ({version_nueva}). Puedes actualizar desde el Panel de Control.")
+        registrar_evento_tarea(id_de_tarea, f"🔄 Versión {version_nueva} disponible: se dejó para más tarde")
+        return
+
+    registrar_evento_tarea(id_de_tarea, f"⬇️ Actualizando a la versión {version_nueva}")
+    print(f"\n⬇️  Descargando la versión {version_nueva}...")
+    try:
+        import tempfile
+        import urllib.request
+        import subprocess
+        ruta_instalador = os.path.join(tempfile.gettempdir(), f"InstaladorMensajesBiblicos_{version_nueva}.exe")
+        urllib.request.urlretrieve(resultado['ruta_archivo'], ruta_instalador)
+        print("🚀 Instalando la nueva versión...")
+        subprocess.Popen([ruta_instalador, '/SILENT'])
+    except Exception as e:
+        print(f"❌ No se pudo descargar la actualización: {e}")
+        registrar_evento_tarea(id_de_tarea, f"❌ No se pudo descargar la versión {version_nueva}")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -524,8 +590,10 @@ def main():
     try:
         if args.tarea and es_full:
             _ejecutar_tarea(config, args.tarea)
+            _avisar_actualizacion(args.tarea)
         elif args.tarea:
             _publicar_mensaje_biblico(config)
+            _avisar_actualizacion(args.tarea)
         elif args.modulo == 'publicar_predicaciones':
             _publicar_predicacion(config)
         elif args.solo_biblico:

@@ -670,18 +670,21 @@ def obtener_config_tarea(id_de_tarea):
     """
     Retorna la configuración de una tarea o None si no tiene.
 
-    Formato: {'nombre': str, 'modulos': [str], 'destinatarios': None | [{'nombre', 'tipo', 'mensaje_asignado'}]}
+    Formato: {'nombre': str, 'modulos': [str], 'destinatarios': None | [{'nombre', 'tipo', 'mensaje_asignado'}],
+              'cantidad': None | int}
     destinatarios None significa usar los destinatarios por defecto.
+    cantidad None significa usar la cantidad de mensajes bíblicos de la configuración general.
     """
     return leer_tareas_programadas().get(id_de_tarea)
 
 
-def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None):
+def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None, cantidad=None):
     tareas = leer_tareas_programadas()
     tareas[id_de_tarea] = {
         'nombre': nombre,
         'modulos': [m for m in modulos if m in dict(MODULOS_DISPONIBLES)],
-        'destinatarios': destinatarios
+        'destinatarios': destinatarios,
+        'cantidad': cantidad
     }
     return _guardar_tareas_programadas(tareas)
 
