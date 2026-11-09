@@ -1047,7 +1047,7 @@ class PanelControl:
                 command=ventana.destroy
             ).pack(pady=15)
 
-            self._centrar_ventana(ventana, 400, 370)
+            self._centrar_ventana(ventana, 470, 370)
             ventana.deiconify()
 
         except Exception as e:

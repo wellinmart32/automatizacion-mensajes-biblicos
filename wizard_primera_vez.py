@@ -1341,6 +1341,9 @@ class WizardPrimeraVez:
 
 
 def main():
+    # El Wizard usa rutas relativas (mensajes/, config_global.txt); deben apuntar a la carpeta del programa
+    base = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    os.chdir(base)
     wizard = WizardPrimeraVez()
     wizard.ejecutar()
 

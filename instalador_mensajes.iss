@@ -1,6 +1,6 @@
 [Setup]
 AppName=Mensajes Biblicos AutoPro
-AppVersion=1.1.1
+AppVersion=1.1.2
 AppPublisher=AutomaPro
 AppPublisherURL=https://automapro.com
 DefaultDirName={userdocs}\AutomaPro\MensajesBiblicos
@@ -32,6 +32,11 @@ Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "compartido\*"; DestDir: "{app}\compartido"; Excludes: "__pycache__"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "publicadores\*"; DestDir: "{app}\publicadores"; Excludes: "__pycache__"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "mensajes\*"; DestDir: "{app}\mensajes"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Check: EsInstalacionNueva
+
+[InstallDelete]
+Type: files; Name: "{app}\publicadores\publicador_facebook_enlaces.py"
+Type: filesandordirs; Name: "{app}\compartido\__pycache__"
+Type: filesandordirs; Name: "{app}\publicadores\__pycache__"
 
 [Dirs]
 Name: "{app}\mensajes"

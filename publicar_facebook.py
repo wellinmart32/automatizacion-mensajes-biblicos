@@ -70,20 +70,10 @@ def mostrar_banner():
 
 
 def mostrar_configuracion(config):
-    print("📁 Verificando estructura...")
     verificar_y_crear_estructura()
-    print()
-    print("⚙️  CONFIGURACIÓN DEL SISTEMA:")
-    print(f"   📁 Carpeta mensajes: {config['carpeta_mensajes']}")
-    print(f"   🌐 Navegador: {config['navegador'].upper()}")
-    print(f"   🎲 Selección: {config['seleccion'].capitalize()}")
-    print(f"   💾 Memoria: Últimos {config['historial_evitar_repetir']} mensajes")
-    print(f"   🔢 Mensajes por ejecución: {config['cantidad_por_ejecucion']}")
-    print(f"   🔄 Máx. intentos: {config.get('max_intentos_por_publicacion', 3)}")
-    if config.get('activar_predicaciones'):
-        print(f"   🎬 Predicaciones: ACTIVADAS")
-        print(f"   📱 Grupo WhatsApp: {config['nombre_grupo_whatsapp']}")
-    print()
+    cantidad = config['cantidad_por_ejecucion']
+    print(f"⚙️  {config['navegador'].capitalize()} · {config['seleccion'].capitalize()} · "
+          f"{cantidad} mensaje{'s' if cantidad != 1 else ''} por ejecución\n")
 
 
 def publicar_con_reintentos(publicador, contenido, tipo_publicacion, config, gestor, nombre_archivo=None):
@@ -92,12 +82,10 @@ def publicar_con_reintentos(publicador, contenido, tipo_publicacion, config, ges
 
     for intento in range(1, max_intentos + 1):
         try:
-            print(f"\n{'='*70}")
-            print(f"🔄 INTENTO {intento} DE {max_intentos}")
-            print(f"{'='*70}\n")
+            if intento > 1:
+                print(f"\n🔄 Reintento {intento} de {max_intentos}")
             exito = publicador.publicar_completo(contenido)
             if exito:
-                print(f"✅ Publicación exitosa en intento {intento}")
                 return True
             else:
                 print(f"⚠️  Intento {intento} falló")
@@ -116,15 +104,26 @@ def publicar_con_reintentos(publicador, contenido, tipo_publicacion, config, ges
     return False
 
 
+def _iniciar_navegador(publicador):
+    """Abre el navegador con un reintento: a veces falla la primera vez (driver descargándose, perfil ocupado un instante)"""
+    try:
+        publicador.iniciar_navegador()
+    except Exception as e:
+        print(f"{A}⚠️  No se pudo abrir el navegador ({type(e).__name__}). Reintentando en 10 s...{X}")
+        publicador.cerrar_navegador()
+        publicador.driver = None
+        time.sleep(10)
+        publicador.iniciar_navegador()
+
+
 def _publicar_mensaje_biblico(config):
+    print(f"\n{N}{C}▶️  PUBLICAR MENSAJE BÍBLICO{X}")
     gestor = GestorRegistro()
-    gestor.mostrar_estadisticas()
-    gestor.mostrar_historial_reciente(5)
 
     tiempo_minimo = config['tiempo_minimo_entre_publicaciones_segundos']
     puede, motivo = gestor.puede_publicar_ahora(tiempo_minimo, config['permitir_forzar_publicacion_manual'])
-    print(f"\n⏱️  {motivo}")
     if not puede:
+        print(f"\n⏱️  {motivo}")
         print(f"{A}⚠️  Aún no se cumple el tiempo mínimo entre publicaciones{X}")
         return
 
@@ -136,7 +135,7 @@ def _publicar_mensaje_biblico(config):
     total = len(mensajes)
     exitosos = 0
     publicador = PublicadorFacebook(config)
-    publicador.iniciar_navegador()
+    _iniciar_navegador(publicador)
 
     try:
         for i, mensaje in enumerate(mensajes, 1):
@@ -163,18 +162,12 @@ def _publicar_mensaje_biblico(config):
         publicador.cerrar_navegador()
 
     color = V if exitosos == total else (A if exitosos else R)
-    print(f"\n{color}{N}" + "="*70 + X)
-    print(f"{color}{N}📊 MENSAJES BÍBLICOS PUBLICADOS: {exitosos}/{total}{X}")
-    print(f"{color}{N}" + "="*70 + X)
+    print(f"\n{color}{N}📊 Mensajes bíblicos publicados: {exitosos}/{total}{X}")
 
 
 def _publicar_predicacion(config):
+    print(f"\n{N}{C}📤 PUBLICAR PRÉDICA EXTRAÍDA{X}")
     gestor = GestorRegistro()
-    gestor.mostrar_estadisticas()
-    print(f"\n{N}{C}" + "="*70 + X)
-    print(f"{N}{C}" + " " * 15 + "📤 PUBLICADOR DE PRÉDICAS EXTRAÍDAS" + X)
-    print(f"{N}{C}" + " " * 20 + "Facebook - Cola de predicaciones" + X)
-    print(f"{N}{C}" + "="*70 + X + "\n")
 
     ruta_archivo, titulo = obtener_siguiente_predicacion()
     if not ruta_archivo:
@@ -199,7 +192,7 @@ def _publicar_predicacion(config):
 
     print(f"\n📹 Publicando predicación: {titulo}")
     publicador = PublicadorFacebook(config)
-    publicador.iniciar_navegador()
+    _iniciar_navegador(publicador)
 
     try:
         exito = publicar_con_reintentos(publicador, contenido, 'predicacion', config, gestor, titulo)
@@ -212,13 +205,9 @@ def _publicar_predicacion(config):
             except Exception as _e:
                 print(f"   ⚠️  No se pudo registrar en historial: {_e}")
             mover_predicacion_a_publicados(titulo)
-            print(f"\n{V}{N}" + "="*70 + X)
-            print(f"{V}{N}✅ PREDICACIÓN PUBLICADA EXITOSAMENTE{X}")
-            print(f"{V}{N}" + "="*70 + X)
+            print(f"\n{V}{N}✅ Prédica publicada: {titulo}{X}")
         else:
-            print(f"\n{R}{N}" + "="*70 + X)
-            print(f"{R}{N}❌ NO SE PUDO PUBLICAR LA PREDICACIÓN{X}")
-            print(f"{R}{N}" + "="*70 + X)
+            print(f"\n{R}{N}❌ No se pudo publicar la prédica {titulo}{X}")
             gestor.registrar_error(titulo, "Falló después de todos los intentos", tipo='predicacion')
     finally:
         publicador.cerrar_navegador()
