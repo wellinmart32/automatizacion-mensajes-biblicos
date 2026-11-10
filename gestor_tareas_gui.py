@@ -865,10 +865,10 @@ class GestorTareasGUI:
         resultado = {'valor': None}
 
         ventana = tk.Toplevel(padre)
+        ventana.withdraw()
         ventana.title("📌 Mensajes fijos de esta tarea")
         ventana.configure(bg="#f0f0f0")
         ventana.transient(padre)
-        ventana.grab_set()
 
         tk.Label(ventana, text="Marca los mensajes que esta tarea publicará siempre",
                  font=("Segoe UI", 10, "bold"), bg="#f0f0f0").pack(anchor='w', padx=15, pady=(12, 2))
@@ -908,9 +908,12 @@ class GestorTareasGUI:
         tk.Button(botones, text="Cancelar", font=("Segoe UI", 10), width=10, command=cerrar).pack(side='right', padx=8)
         ventana.protocol("WM_DELETE_WINDOW", cerrar)
 
-        x = padre.winfo_rootx() + 40
-        y = padre.winfo_rooty() + 40
+        ventana.update_idletasks()
+        x = (ventana.winfo_screenwidth() // 2) - 260
+        y = (ventana.winfo_screenheight() // 2) - 230
         ventana.geometry(f'520x460+{x}+{y}')
+        ventana.deiconify()
+        ventana.grab_set()
         ventana.wait_window()
         return resultado['valor']
 
