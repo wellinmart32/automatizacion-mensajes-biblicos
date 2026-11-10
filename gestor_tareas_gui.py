@@ -13,6 +13,7 @@ from compartido.gestor_archivos import (
     id_de_nombre_tarea,
     migrar_tareas_antiguas,
     modulos_secuencia_general,
+    listar_mensajes_con_titulo,
     MODULOS_DISPONIBLES
 )
 from compartido.selector_destinatarios import SelectorDestinatarios
@@ -613,7 +614,8 @@ class GestorTareasGUI:
                 nombre_completo = n if n.startswith(self.prefijo_tarea) else f"{self.prefijo_tarea}_{n}"
                 subprocess.run(['schtasks', '/Delete', '/TN', nombre_completo, '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
-            guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'], acciones['cantidad'])
+            guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'],
+                                 acciones['cantidad'], acciones['mensajes_fijos'])
             ventana.destroy()
             self._crear_tarea_windows(nombre, frecuencia, horario, dias_selec if frecuencia == "WEEKLY" else None, mostrar_aviso_hora)
             
@@ -624,8 +626,8 @@ class GestorTareasGUI:
         tk.Button(frame_btns, text=texto_boton, font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", width=18, command=guardar).pack(side='right', padx=(10, 30))
         
         x = (ventana.winfo_screenwidth() // 2) - 300
-        y = (ventana.winfo_screenheight() // 2) - 300
-        ventana.geometry(f'600x600+{x}+{y}')
+        y = (ventana.winfo_screenheight() // 2) - 320
+        ventana.geometry(f'600x640+{x}+{y}')
         ventana.deiconify()
 
     def _crear_tarea_windows(self, nombre, frecuencia, horario, dias=None, ya_mostro_aviso=False):
@@ -716,15 +718,18 @@ class GestorTareasGUI:
             activos = list(config_tarea.get('modulos', []))
             destinatarios = config_tarea.get('destinatarios')
             cantidad = config_tarea.get('cantidad')
+            mensajes_fijos = config_tarea.get('mensajes_fijos')
         else:
             activos = modulos_secuencia_general()
             destinatarios = None
             cantidad = None
+            mensajes_fijos = None
 
         nombres = dict(MODULOS_DISPONIBLES)
         estado = {
             'orden': [m for m in activos if m in nombres] + [m for m in nombres if m not in activos],
-            'destinatarios': destinatarios
+            'destinatarios': destinatarios,
+            'mensajes_fijos': list(mensajes_fijos or [])
         }
         vars_activos = {m: tk.BooleanVar(value=m in activos) for m in nombres}
 
@@ -761,6 +766,35 @@ class GestorTareasGUI:
         var_cantidad = tk.StringVar(value=str(cantidad) if cantidad else opcion_general)
         ttk.Combobox(fila_cantidad, textvariable=var_cantidad, values=[opcion_general] + [str(n) for n in range(1, 11)],
                      state='readonly', width=28, font=("Segoe UI", 9)).pack(side='left', padx=(8, 0))
+
+        fila_fijos = tk.Frame(tab, bg="#f0f0f0")
+        fila_fijos.pack(anchor='w', padx=15, pady=(6, 0))
+        tk.Label(fila_fijos, text="📌 Mensajes fijos:", font=("Segoe UI", 10), bg="#f0f0f0").pack(side='left')
+        lbl_fijos = tk.Label(fila_fijos, font=("Segoe UI", 9), fg="#555", bg="#f0f0f0")
+
+        def actualizar_fijos():
+            fijos = estado['mensajes_fijos']
+            if not fijos:
+                lbl_fijos.config(text="ninguno (rotación normal)")
+            else:
+                nombres_cortos = ", ".join(m[:-4] for m in fijos[:3]) + ("…" if len(fijos) > 3 else "")
+                lbl_fijos.config(text=f"{len(fijos)} elegido(s): {nombres_cortos}")
+
+        def elegir_fijos():
+            formulario = tab.winfo_toplevel()
+            elegidos = self._elegir_mensajes_fijos(formulario, estado['mensajes_fijos'])
+            formulario.grab_set()
+            if elegidos is not None:
+                estado['mensajes_fijos'] = elegidos
+                actualizar_fijos()
+
+        tk.Button(fila_fijos, text="✅ Elegir…", font=("Segoe UI", 9), bg="#1a73e8", fg="white",
+                  command=elegir_fijos).pack(side='left', padx=(10, 6))
+        lbl_fijos.pack(side='left')
+        actualizar_fijos()
+        tk.Label(tab, text="Con mensajes fijos la tarea publica siempre esos mensajes (turnándolos según la cantidad)\n"
+                           "y dejan de salir en la rotación normal de las demás tareas y del Panel",
+                 font=("Segoe UI", 8), fg="#555", bg="#f0f0f0", justify='left').pack(anchor='w', padx=15)
 
         tk.Label(tab, text="💡 'Publicar Prédica' siempre se ejecuta después de 'Extraer'",
                  font=("Segoe UI", 8), fg="#1a73e8", bg="#f0f0f0").pack(anchor='w', padx=15, pady=(4, 10))
@@ -819,10 +853,66 @@ class GestorTareasGUI:
             return {
                 'modulos': modulos,
                 'destinatarios': estado['destinatarios'] if usa_propios else None,
-                'cantidad': None if var_cantidad.get() == opcion_general else int(var_cantidad.get())
+                'cantidad': None if var_cantidad.get() == opcion_general else int(var_cantidad.get()),
+                'mensajes_fijos': estado['mensajes_fijos'] or None
             }
 
         return obtener
+
+    def _elegir_mensajes_fijos(self, padre, preseleccion):
+        """Ventana con casillas para marcar los mensajes fijos de una tarea. Retorna la lista o None si se cancela"""
+        mensajes = listar_mensajes_con_titulo()
+        resultado = {'valor': None}
+
+        ventana = tk.Toplevel(padre)
+        ventana.title("📌 Mensajes fijos de esta tarea")
+        ventana.configure(bg="#f0f0f0")
+        ventana.transient(padre)
+        ventana.grab_set()
+
+        tk.Label(ventana, text="Marca los mensajes que esta tarea publicará siempre",
+                 font=("Segoe UI", 10, "bold"), bg="#f0f0f0").pack(anchor='w', padx=15, pady=(12, 2))
+        tk.Label(ventana, text="Ninguno marcado = la tarea usa la rotación normal",
+                 font=("Segoe UI", 8), fg="#555", bg="#f0f0f0").pack(anchor='w', padx=15, pady=(0, 6))
+
+        marco = tk.Frame(ventana, bg="white", relief='solid', borderwidth=1)
+        marco.pack(fill='both', expand=True, padx=15)
+        lienzo = tk.Canvas(marco, bg="white", highlightthickness=0)
+        barra = ttk.Scrollbar(marco, orient='vertical', command=lienzo.yview)
+        interior = tk.Frame(lienzo, bg="white")
+        interior.bind('<Configure>', lambda e: lienzo.configure(scrollregion=lienzo.bbox('all')))
+        lienzo.create_window((0, 0), window=interior, anchor='nw')
+        lienzo.configure(yscrollcommand=barra.set)
+        lienzo.pack(side='left', fill='both', expand=True)
+        barra.pack(side='right', fill='y')
+        lienzo.bind_all('<MouseWheel>', lambda e: lienzo.yview_scroll(int(-e.delta / 120), 'units'))
+
+        variables = {}
+        for archivo, titulo in mensajes:
+            variables[archivo] = tk.BooleanVar(value=archivo in (preseleccion or []))
+            tk.Checkbutton(interior, text=f"{archivo[:-4]}  ·  {titulo[:60]}", variable=variables[archivo],
+                           font=("Segoe UI", 9), bg="white", anchor='w').pack(fill='x', padx=6)
+
+        def aceptar():
+            resultado['valor'] = [a for a, v in variables.items() if v.get()]
+            cerrar()
+
+        def cerrar():
+            lienzo.unbind_all('<MouseWheel>')
+            ventana.destroy()
+
+        botones = tk.Frame(ventana, bg="#f0f0f0")
+        botones.pack(fill='x', padx=15, pady=10)
+        tk.Button(botones, text="✅ Aceptar", font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white",
+                  width=12, command=aceptar).pack(side='right')
+        tk.Button(botones, text="Cancelar", font=("Segoe UI", 10), width=10, command=cerrar).pack(side='right', padx=8)
+        ventana.protocol("WM_DELETE_WINDOW", cerrar)
+
+        x = padre.winfo_rootx() + 40
+        y = padre.winfo_rooty() + 40
+        ventana.geometry(f'520x460+{x}+{y}')
+        ventana.wait_window()
+        return resultado['valor']
 
     def _id_de(self, nombre):
         return id_de_nombre_tarea(nombre)
@@ -842,7 +932,9 @@ class GestorTareasGUI:
         partes = []
         for modulo in config_tarea.get('modulos', []):
             texto = cortos.get(modulo, modulo)
-            if modulo == 'biblico' and config_tarea.get('cantidad'):
+            if modulo == 'biblico' and config_tarea.get('mensajes_fijos'):
+                texto += f" (📌 {len(config_tarea['mensajes_fijos'])} fijo{'s' if len(config_tarea['mensajes_fijos']) != 1 else ''})"
+            elif modulo == 'biblico' and config_tarea.get('cantidad'):
                 texto += f" ({config_tarea['cantidad']})"
             if modulo == 'oraciones' and config_tarea.get('destinatarios'):
                 texto += f" ({len(config_tarea['destinatarios'])})"

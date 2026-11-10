@@ -536,7 +536,8 @@ def _rellenar_aleatorio(todos, ya_elegidos, cantidad, registro_publicaciones, co
 def _rellenar_secuencial(todos, ya_elegidos, cantidad, registro_publicaciones):
     ultimo_biblico = None
     for entrada in reversed(registro_publicaciones.get('historial_completo', [])):
-        if entrada.get('tipo', 'biblico') == 'biblico':
+        # Se ignoran los mensajes fijos de tareas (no están en la rotación) para no reiniciar la secuencia
+        if entrada.get('tipo', 'biblico') == 'biblico' and entrada.get('mensaje_archivo') in todos:
             ultimo_biblico = entrada.get('mensaje_archivo')
             break
 
@@ -554,6 +555,33 @@ def _rellenar_secuencial(todos, ya_elegidos, cantidad, registro_publicaciones):
             break
 
     return seleccion
+
+
+def _mensajes_fijos_a_publicar(carpeta, todos, fijos, cantidad, registro_publicaciones, config):
+    """Toma 'cantidad' mensajes fijos de la tarea, turnándolos desde el siguiente al último publicado"""
+    print(f"📌 Mensajes fijos de la tarea: {len(fijos)}")
+    inexistentes = [m for m in fijos if m not in todos]
+    if inexistentes:
+        print(f"⚠️  Mensajes fijos que ya no existen (se ignoran): {', '.join(inexistentes)}")
+    fijos = [m for m in fijos if m in todos]
+    if not fijos:
+        print("❌ La tarea no tiene mensajes fijos válidos")
+        return []
+
+    inicio = 0
+    for entrada in reversed(registro_publicaciones.get('historial_completo', [])):
+        if entrada.get('tipo', 'biblico') == 'biblico' and entrada.get('mensaje_archivo') in fijos:
+            inicio = (fijos.index(entrada['mensaje_archivo']) + 1) % len(fijos)
+            break
+
+    resultado = []
+    for i in range(min(cantidad, len(fijos))):
+        nombre = fijos[(inicio + i) % len(fijos)]
+        contenido = _leer_mensaje_transformado(carpeta, nombre, config)
+        if contenido:
+            resultado.append({'nombre': nombre, 'contenido': contenido, 'elegido': False, 'fijo': True})
+            print(f"   {i + 1}. 📌 {nombre}")
+    return resultado
 
 
 def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
@@ -576,8 +604,19 @@ def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
         print(f"❌ No hay archivos .txt en la carpeta: {carpeta}")
         return []
 
-    modo = config['seleccion']
     cantidad = cantidad or config['cantidad_por_ejecucion']
+    if config.get('mensajes_fijos'):
+        return _mensajes_fijos_a_publicar(carpeta, todos, config['mensajes_fijos'], cantidad, registro_publicaciones, config)
+
+    # Los mensajes fijos de alguna tarea solo salen en su tarea, nunca en la rotación normal
+    reservados = mensajes_fijos_de_tareas()
+    if reservados & set(todos):
+        todos = [m for m in todos if m not in reservados]
+        if not todos:
+            print("❌ Todos los mensajes están reservados como mensajes fijos de alguna tarea")
+            return []
+
+    modo = config['seleccion']
 
     elegidos = []
     if modo in ('elegidos', 'hibrido'):
@@ -609,7 +648,7 @@ def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
     for nombre in elegidos + relleno:
         contenido = _leer_mensaje_transformado(carpeta, nombre, config)
         if contenido:
-            resultado.append({'nombre': nombre, 'contenido': contenido, 'elegido': nombre in elegidos})
+            resultado.append({'nombre': nombre, 'contenido': contenido, 'elegido': nombre in elegidos, 'fijo': False})
 
     for i, m in enumerate(resultado, 1):
         marca = "📌" if m['elegido'] else ("📋" if tipo_relleno == 'secuencial' else "🎲")
@@ -671,22 +710,48 @@ def obtener_config_tarea(id_de_tarea):
     Retorna la configuración de una tarea o None si no tiene.
 
     Formato: {'nombre': str, 'modulos': [str], 'destinatarios': None | [{'nombre', 'tipo', 'mensaje_asignado'}],
-              'cantidad': None | int}
+              'cantidad': None | int, 'mensajes_fijos': None | [str]}
     destinatarios None significa usar los destinatarios por defecto.
     cantidad None significa usar la cantidad de mensajes bíblicos de la configuración general.
+    mensajes_fijos son archivos que la tarea publica siempre, turnándolos, en lugar de la rotación normal.
     """
     return leer_tareas_programadas().get(id_de_tarea)
 
 
-def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None, cantidad=None):
+def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None, cantidad=None, mensajes_fijos=None):
     tareas = leer_tareas_programadas()
     tareas[id_de_tarea] = {
         'nombre': nombre,
         'modulos': [m for m in modulos if m in dict(MODULOS_DISPONIBLES)],
         'destinatarios': destinatarios,
-        'cantidad': cantidad
+        'cantidad': cantidad,
+        'mensajes_fijos': mensajes_fijos or None
     }
     return _guardar_tareas_programadas(tareas)
+
+
+def mensajes_fijos_de_tareas():
+    """Archivos de mensajes reservados como mensajes fijos en alguna tarea automática"""
+    reservados = set()
+    for tarea in leer_tareas_programadas().values():
+        reservados.update(tarea.get('mensajes_fijos') or [])
+    return reservados
+
+
+def listar_mensajes_con_titulo():
+    """Retorna [(archivo, primera línea)] de la carpeta de mensajes, ordenados por nombre"""
+    carpeta = os.path.join(_base_dir(), 'mensajes')
+    if not os.path.exists(carpeta):
+        return []
+    resultado = []
+    for archivo in sorted(f for f in os.listdir(carpeta) if f.endswith('.txt')):
+        try:
+            with open(os.path.join(carpeta, archivo), 'r', encoding='utf-8') as f:
+                titulo = f.readline().strip()
+        except Exception:
+            titulo = ''
+        resultado.append((archivo, titulo))
+    return resultado
 
 
 def eliminar_config_tarea(id_de_tarea):

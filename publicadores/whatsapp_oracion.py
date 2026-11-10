@@ -390,9 +390,37 @@ class PublicadorWhatsAppOracion:
                 continue
         return None
 
+    def _cerrar_avisos(self):
+        """Cierra avisos de WhatsApp (novedades, consejos) que tapan la pantalla y bloquean los clics"""
+        textos_botones = ['Continuar', 'Aceptar', 'Entendido', 'OK', 'Cerrar', 'Ahora no', 'Más tarde']
+        for _ in range(3):
+            dialogos = self.driver.find_elements(By.XPATH, "//div[@role='dialog']")
+            if not dialogos:
+                return
+            print("   ℹ️  Cerrando aviso de WhatsApp...")
+            cerrado = False
+            for texto in textos_botones:
+                botones = dialogos[0].find_elements(
+                    By.XPATH, f".//button[normalize-space()='{texto}'] | .//div[@role='button'][normalize-space()='{texto}']"
+                )
+                if botones:
+                    try:
+                        botones[0].click()
+                        cerrado = True
+                        break
+                    except Exception:
+                        pass
+            if not cerrado:
+                try:
+                    self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
+            time.sleep(1)
+
     def buscar_chat(self, nombre_chat):
         """Busca chat por nombre"""
         print(f"\n🔍 Buscando chat: {nombre_chat}")
+        self._cerrar_avisos()
         try:
             from selenium.webdriver.common.action_chains import ActionChains
 

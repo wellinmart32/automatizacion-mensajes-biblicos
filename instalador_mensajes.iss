@@ -1,6 +1,6 @@
 [Setup]
 AppName=Mensajes Biblicos AutoPro
-AppVersion=1.2.1
+AppVersion=1.3.0
 AppPublisher=AutomaPro
 AppPublisherURL=https://automapro.com
 DefaultDirName={userdocs}\AutomaPro\MensajesBiblicos

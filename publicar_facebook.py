@@ -140,7 +140,7 @@ def _publicar_mensaje_biblico(config):
     try:
         for i, mensaje in enumerate(mensajes, 1):
             nombre_archivo = mensaje['nombre']
-            marca = " 📌" if mensaje['elegido'] else ""
+            marca = " 📌" if mensaje['elegido'] or mensaje.get('fijo') else ""
             print(f"\n{N}{C}📖 MENSAJE {i}/{total}: {nombre_archivo}{marca}{X}")
 
             inicio = time.time()
@@ -357,10 +357,12 @@ def _ejecutar_tarea(config, id_de_tarea):
     modulos = config_tarea.get('modulos', [])
     destinatarios = config_tarea.get('destinatarios')
     cantidad = config_tarea.get('cantidad')
+    mensajes_fijos = config_tarea.get('mensajes_fijos')
     nombres = dict(MODULOS_DISPONIBLES)
+    # Copia para no alterar la configuración general que usan los demás módulos
+    config = dict(config)
+    config['mensajes_fijos'] = mensajes_fijos
     if cantidad:
-        # Copia para no alterar la configuración general que usan los demás módulos
-        config = dict(config)
         config['cantidad_por_ejecucion'] = cantidad
 
     print(f"\n{N}{C}🗓️  TAREA AUTOMÁTICA: {config_tarea.get('nombre', id_de_tarea)}{X}")
@@ -368,6 +370,8 @@ def _ejecutar_tarea(config, id_de_tarea):
         print(f"   {i}. {nombres.get(modulo, modulo)}")
     if 'biblico' in modulos:
         print(f"   📖 Mensajes bíblicos: {f'{cantidad} propios de la tarea' if cantidad else 'los de la configuración general'}")
+        if mensajes_fijos:
+            print(f"   📌 Mensajes fijos: {', '.join(m[:-4] for m in mensajes_fijos)}")
     if 'oraciones' in modulos:
         print(f"   📱 Destinatarios: {f'{len(destinatarios)} propios de la tarea' if destinatarios else 'los de por defecto'}")
 
