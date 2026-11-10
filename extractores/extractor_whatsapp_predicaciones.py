@@ -130,6 +130,18 @@ class ExtractorWhatsAppPredicaciones:
             print(f"⚠️  Error leyendo config navegador: {e}")
         return 'firefox', True, True
 
+    def leer_nombre_grupo(self):
+        """Nombre del grupo configurado en Configurador → Extractor WhatsApp"""
+        try:
+            config = configparser.RawConfigParser(delimiters=('=',))
+            config.read(self.archivo_config, encoding='utf-8')
+            nombre = config.get('PREDICACIONES', 'nombre_grupo_whatsapp', fallback='').split('#')[0].strip()
+            if nombre:
+                return nombre
+        except Exception as e:
+            print(f"⚠️  Error leyendo el nombre del grupo: {e}")
+        return 'Prédicas'
+
     def iniciar_navegador(self):
         """Inicializa el navegador configurado en [PREDICACIONES]"""
         navegador, usar_perfil, maximizar = self._leer_config_navegador()
@@ -380,17 +392,50 @@ class ExtractorWhatsAppPredicaciones:
             print(f"\n❌ Error esperando carga de WhatsApp: {e}")
             return False
     
+    def _cerrar_avisos(self):
+        """Cierra avisos de WhatsApp (novedades, consejos) que tapan la pantalla y bloquean los clics"""
+        textos_botones = ['Continuar', 'Aceptar', 'Entendido', 'OK', 'Cerrar', 'Ahora no', 'Más tarde']
+        for _ in range(3):
+            dialogos = self.driver.find_elements(By.XPATH, "//div[@role='dialog']")
+            if not dialogos:
+                return
+            print("   ℹ️  Cerrando aviso de WhatsApp...")
+            cerrado = False
+            for texto in textos_botones:
+                botones = dialogos[0].find_elements(
+                    By.XPATH, f".//button[normalize-space()='{texto}'] | .//div[@role='button'][normalize-space()='{texto}']"
+                )
+                if botones:
+                    try:
+                        botones[0].click()
+                        cerrado = True
+                        break
+                    except Exception:
+                        pass
+            if not cerrado:
+                try:
+                    self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
+            time.sleep(1)
+
     def buscar_grupo(self, nombre_grupo):
         """Busca y abre un grupo específico"""
         print(f"🔍 Buscando grupo: '{nombre_grupo}'")
         
         try:
             # Limpiar barra de búsqueda
+            self._cerrar_avisos()
             barra_busqueda = self._encontrar_barra_busqueda(timeout=10)
             if not barra_busqueda:
                 print("❌ No se encontró la barra de búsqueda")
                 return False
-            barra_busqueda.click()
+            try:
+                barra_busqueda.click()
+            except Exception:
+                # Un aviso de WhatsApp pudo aparecer encima justo ahora: se cierra y se reintenta
+                self._cerrar_avisos()
+                self.driver.execute_script("arguments[0].click();", barra_busqueda)
             time.sleep(0.5)
             
             barra_busqueda.send_keys(Keys.CONTROL + "a")
@@ -443,6 +488,8 @@ class ExtractorWhatsAppPredicaciones:
             predicaciones_extraidas = []
             numero_siguiente = self.obtener_siguiente_numero()
             scrolls_realizados = 0
+            altura_anterior = None
+            scrolls_sin_crecer = 0
             scrolls_sin_nuevos = 0
             
             print("🔄 Iniciando extracción...\n")
@@ -522,8 +569,17 @@ class ExtractorWhatsAppPredicaciones:
                 
                 # Hacer scroll hacia arriba para cargar mensajes más antiguos
                 print(f"   🔄 Haciendo scroll para cargar mensajes más antiguos...")
-                self._hacer_scroll_arriba(contenedor_chat)
+                altura = self._hacer_scroll_arriba(contenedor_chat)
                 scrolls_realizados += 1
+                # Si al subir la conversación ya no crece, se llegó al inicio del grupo
+                if altura is not None and altura == altura_anterior:
+                    scrolls_sin_crecer += 1
+                    if scrolls_sin_crecer >= 3:
+                        print("\n⛔ La conversación ya no carga mensajes más antiguos: se llegó al inicio del grupo")
+                        break
+                else:
+                    scrolls_sin_crecer = 0
+                altura_anterior = altura
                 
                 # Esperar a que WhatsApp cargue mensajes
                 time.sleep(5)
@@ -545,36 +601,25 @@ class ExtractorWhatsAppPredicaciones:
             return predicaciones_extraidas
     
     def _hacer_scroll_arriba(self, contenedor_chat):
-        """Hace scroll hacia arriba usando múltiples estrategias"""
+        """Sube al inicio de lo cargado para que WhatsApp traiga mensajes más antiguos; retorna la altura de la conversación"""
         try:
-            # Estrategia 1: scrollTop
-            current_scroll = self.driver.execute_script(
-                "return arguments[0].scrollTop;", 
-                contenedor_chat
-            )
-            new_position = max(0, current_scroll - 3000)
-            self.driver.execute_script(
-                f"arguments[0].scrollTop = {new_position};", 
-                contenedor_chat
-            )
-            time.sleep(0.5)
-            
-            # Estrategia 2: scrollIntoView del primer mensaje
-            try:
-                primer_mensaje = self.driver.find_element(
-                    By.XPATH, 
-                    "(//div[contains(@class, 'message-out')])[1]"
-                )
-                self.driver.execute_script(
-                    "arguments[0].scrollIntoView({block: 'start', behavior: 'smooth'});", 
-                    primer_mensaje
-                )
-                time.sleep(0.5)
-            except:
-                pass
-                
+            mensajes = self._encontrar_mensajes_propios()
+            referencia = mensajes[0] if mensajes else contenedor_chat
+            # El que se desplaza es un div interno de #main, no #main: se busca el primer ancestro con scroll
+            return self.driver.execute_script("""
+                let el = arguments[0];
+                while (el && !(el.scrollHeight > el.clientHeight &&
+                               /(auto|scroll)/.test(getComputedStyle(el).overflowY))) {
+                    el = el.parentElement;
+                }
+                if (!el) return null;
+                const altura = el.scrollHeight;
+                el.scrollTop = 0;
+                return altura;
+            """, referencia)
         except Exception as e:
             print(f"   ⚠️  Error en scroll: {e}")
+            return None
     
     def _extraer_predicacion_de_mensaje(self, elemento_mensaje):
         """
@@ -603,7 +648,7 @@ class ExtractorWhatsAppPredicaciones:
                 texto = texto_elemento.text
                 
                 import re
-                patron_url = r'https?://(?:www\.)?(?:instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com)[^\s]+'
+                patron_url = r'https?://(?:www\.)?(?:instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|threads\.com|threads\.net)[^\s]+'
                 match = re.search(patron_url, texto)
                 
                 if match:
@@ -619,7 +664,9 @@ class ExtractorWhatsAppPredicaciones:
                              "contains(@href, 'instagram.com') or "
                              "contains(@href, 'facebook.com') or "
                              "contains(@href, 'fb.watch') or "
-                             "contains(@href, 'tiktok.com')]"
+                             "contains(@href, 'tiktok.com') or "
+                             "contains(@href, 'threads.com') or "
+                             "contains(@href, 'threads.net')]"
                 )
                 
                 if enlaces:
@@ -634,7 +681,7 @@ class ExtractorWhatsAppPredicaciones:
     
     def _es_url_valida(self, url):
         """Verifica si la URL es de una plataforma válida"""
-        dominios_validos = ['instagram.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'tiktok.com']
+        dominios_validos = ['instagram.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'tiktok.com', 'threads.com', 'threads.net']
         return any(dominio in url for dominio in dominios_validos)
     
     def guardar_predicaciones(self, predicaciones):
@@ -710,4 +757,6 @@ class ExtractorWhatsAppPredicaciones:
 
 if __name__ == "__main__":
     extractor = ExtractorWhatsAppPredicaciones()
-    extractor.ejecutar("Prédicas")
+    extractor.ejecutar(extractor.leer_nombre_grupo())
+    print("\n👋 Finalizando programa...")
+    time.sleep(2)

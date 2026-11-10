@@ -44,11 +44,11 @@ echo [6/8] Compilando GestorTareasMensajes.exe...
 echo.
 
 echo [7/8] Compilando OracionesWhatsApp.exe...
-%PYINSTALLER% %FLAGS% %DATOS_BASE% --add-data "publicadores;publicadores" --add-data "llamados-oracion;llamados-oracion" --icon=iconos/pray.ico --name OracionesWhatsApp publicadores/whatsapp_oracion.py
+%PYINSTALLER% %FLAGS_CONSOLA% %DATOS_BASE% --add-data "publicadores;publicadores" --add-data "llamados-oracion;llamados-oracion" --icon=iconos/pray.ico --name OracionesWhatsApp publicadores/whatsapp_oracion.py
 echo.
 
 echo [8/8] Compilando ExtractorPredicaciones.exe...
-%PYINSTALLER% %FLAGS% %DATOS_BASE% --add-data "extractores;extractores" --add-data "cola-facebook;cola-facebook" --icon=iconos/clapper.ico --name ExtractorPredicaciones extractores/extractor_whatsapp_predicaciones.py
+%PYINSTALLER% %FLAGS_CONSOLA% %DATOS_BASE% --add-data "extractores;extractores" --add-data "cola-facebook;cola-facebook" --icon=iconos/clapper.ico --name ExtractorPredicaciones extractores/extractor_whatsapp_predicaciones.py
 echo.
 
 echo ============================================================
