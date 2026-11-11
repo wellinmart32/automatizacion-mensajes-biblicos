@@ -676,6 +676,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--destinatarios', default=None)
+    parser.add_argument('--sin-pausa', action='store_true')
     args, _ = parser.parse_known_args()
 
     publicador = PublicadorWhatsAppOracion()
@@ -702,7 +703,14 @@ def main():
 
     finally:
         print("\n👋 Finalizando programa...")
-        time.sleep(2)
+        # Dentro de una tarea o secuencia se cierra sola; abierto desde el Panel espera a que leas el resultado
+        if args.sin_pausa:
+            time.sleep(2)
+        else:
+            try:
+                input("\nPresiona Enter para cerrar...")
+            except (EOFError, KeyboardInterrupt):
+                pass
 
 
 if __name__ == "__main__":

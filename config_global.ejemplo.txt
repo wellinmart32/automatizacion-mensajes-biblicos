@@ -1,5 +1,7 @@
 # ============================================================
 # CONFIGURACIÓN GLOBAL - PUBLICADOR AUTOMÁTICO FACEBOOK
+# Plantilla: el instalador la copia como config_global.txt solo en instalaciones nuevas.
+# config_global.txt es personal de cada equipo y no se sube a GitHub.
 # ============================================================
 
 [GENERAL]
@@ -40,6 +42,9 @@ permitir_forzar_publicacion_manual = si
 [PREDICACIONES]
 activar_predicaciones = si
 alternar_con_predicaciones = no
+extraer_de_whatsapp = si
+extraer_de_carpeta = no
+carpeta_predicaciones =
 nombre_grupo_whatsapp = Prédicas
 mensajes_por_extraccion = 10
 navegador = firefox
@@ -54,6 +59,18 @@ usar_estrategia_optimizada_enlaces = si
 [ORACIONES]
 navegador = firefox
 usar_perfil_existente = si
+
+[CORREO]
+proveedor = gmail
+servidor = smtp.gmail.com
+puerto = 465
+seguridad = ssl
+remitente =
+nombre_remitente =
+asunto = {titulo}
+enviar_biblicos = si
+enviar_predicas = si
+pausa_entre_envios_segundos = 3
 
 [DEBUG]
 modo_debug = detallado

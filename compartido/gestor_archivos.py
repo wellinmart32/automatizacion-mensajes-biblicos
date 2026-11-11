@@ -86,9 +86,15 @@ def leer_config_global():
 
 
 def crear_config_defecto():
-    """Crea config_global.txt con valores por defecto si no existe"""
-    print("⚠️  Función crear_config_defecto() no implementada aún")
-    print("   Por favor, copia manualmente el archivo config_global.txt al proyecto")
+    """Crea config_global.txt a partir de la plantilla config_global.ejemplo.txt"""
+    import shutil
+    base = _base_dir()
+    plantilla = os.path.join(base, "config_global.ejemplo.txt")
+    if os.path.exists(plantilla):
+        shutil.copyfile(plantilla, os.path.join(base, "config_global.txt"))
+        print("   ✅ config_global.txt creado desde la plantilla")
+    else:
+        print("   ❌ Falta config_global.ejemplo.txt: copia manualmente config_global.txt al proyecto")
 
 
 def verificar_y_crear_estructura():
@@ -662,9 +668,10 @@ def obtener_mensajes_a_publicar(registro_publicaciones, config, cantidad=None):
 
 MODULOS_DISPONIBLES = [
     ("biblico",          "▶️  Publicar Mensaje Bíblico en Facebook"),
-    ("extraer",          "🎬  Extraer Predicaciones de WhatsApp"),
+    ("extraer",          "🎬  Extraer Predicaciones (WhatsApp / carpeta)"),
     ("publicar_predica", "📤  Publicar Prédica Extraída en Facebook"),
     ("oraciones",        "📱  Enviar Oraciones por WhatsApp"),
+    ("correo",           "✉️  Enviar Mensaje por Correo"),
 ]
 
 
@@ -710,22 +717,24 @@ def obtener_config_tarea(id_de_tarea):
     Retorna la configuración de una tarea o None si no tiene.
 
     Formato: {'nombre': str, 'modulos': [str], 'destinatarios': None | [{'nombre', 'tipo', 'mensaje_asignado'}],
-              'cantidad': None | int, 'mensajes_fijos': None | [str]}
-    destinatarios None significa usar los destinatarios por defecto.
+              'cantidad': None | int, 'mensajes_fijos': None | [str], 'destinatarios_correo': None | [str]}
+    destinatarios None significa usar los destinatarios por defecto (igual destinatarios_correo).
     cantidad None significa usar la cantidad de mensajes bíblicos de la configuración general.
     mensajes_fijos son archivos que la tarea publica siempre, turnándolos, en lugar de la rotación normal.
     """
     return leer_tareas_programadas().get(id_de_tarea)
 
 
-def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None, cantidad=None, mensajes_fijos=None):
+def guardar_config_tarea(id_de_tarea, nombre, modulos, destinatarios=None, cantidad=None, mensajes_fijos=None,
+                         destinatarios_correo=None):
     tareas = leer_tareas_programadas()
     tareas[id_de_tarea] = {
         'nombre': nombre,
         'modulos': [m for m in modulos if m in dict(MODULOS_DISPONIBLES)],
         'destinatarios': destinatarios,
         'cantidad': cantidad,
-        'mensajes_fijos': mensajes_fijos or None
+        'mensajes_fijos': mensajes_fijos or None,
+        'destinatarios_correo': destinatarios_correo or None
     }
     return _guardar_tareas_programadas(tareas)
 
@@ -770,6 +779,34 @@ def id_de_nombre_tarea(nombre):
     if n.startswith(PREFIJO_TAREAS + "_"):
         n = n[len(PREFIJO_TAREAS) + 1:]
     return id_tarea(n)
+
+
+def leer_fuentes_predicaciones():
+    """De dónde extrae prédicas el Extractor: grupo de WhatsApp y/o carpeta de archivos (local o de Google Drive)"""
+    cfg = configparser.RawConfigParser(delimiters=('=',))
+    cfg.read(os.path.join(_base_dir(), "config_global.txt"), encoding='utf-8')
+
+    def valor(clave, defecto):
+        return cfg.get('PREDICACIONES', clave, fallback=defecto).split('#')[0].strip()
+
+    return {
+        'whatsapp': valor('extraer_de_whatsapp', 'si').lower() == 'si',
+        'carpeta': valor('extraer_de_carpeta', 'no').lower() == 'si',
+        'ruta': valor('carpeta_predicaciones', ''),
+        'grupo': valor('nombre_grupo_whatsapp', ''),
+    }
+
+
+def problema_fuentes_predicaciones():
+    """Texto del problema que impide extraer prédicas, o None si las fuentes están bien configuradas"""
+    fuentes = leer_fuentes_predicaciones()
+    if not fuentes['whatsapp'] and not fuentes['carpeta']:
+        return "No hay ninguna fuente de prédicas activada (WhatsApp o carpeta)"
+    if fuentes['whatsapp'] and not fuentes['grupo']:
+        return "Falta el nombre del grupo de WhatsApp de prédicas"
+    if fuentes['carpeta'] and not os.path.isdir(fuentes['ruta']):
+        return "La carpeta de prédicas no existe o no está configurada"
+    return None
 
 
 def modulos_secuencia_general():

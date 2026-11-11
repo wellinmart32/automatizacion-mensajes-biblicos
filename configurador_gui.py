@@ -6,6 +6,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from compartido.toast import Toast
 from compartido.gestor_archivos import leer_mensajes_elegidos
+from publicadores.publicador_correo import (
+    PROVEEDORES, leer_config_correo, leer_contrasena, guardar_contrasena, probar_conexion,
+    leer_destinatarios_correo, guardar_destinatarios_correo, falta_configuracion_correo
+)
 
 
 class ConfiguradorGUI:
@@ -53,8 +57,8 @@ class ConfiguradorGUI:
         except Exception:
             pass
 
-        width = 620
-        height = 620
+        width = 700
+        height = 660
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f'{width}x{height}+{x}+{y}')
@@ -106,6 +110,15 @@ class ConfiguradorGUI:
                 self.config['PREDICACIONES']['mensajes_por_extraccion'] = self.var_mensajes_extraccion.get()
                 self.config['PREDICACIONES']['navegador'] = self.var_nav_predicaciones.get()
                 self.config['PREDICACIONES']['texto_introduccion_predica'] = self.var_mensaje_intro_predica.get()
+                if not self.var_fuente_whatsapp.get() and not self.var_fuente_carpeta.get():
+                    messagebox.showerror("❌ Extractor", "Marca al menos una fuente de predicaciones (WhatsApp o carpeta)")
+                    return
+                if self.var_fuente_carpeta.get() and not os.path.isdir(self.var_carpeta_predicaciones.get().strip()):
+                    messagebox.showerror("❌ Extractor", "La carpeta de predicaciones no existe. Elígela con '📁 Elegir…'")
+                    return
+                self.config['PREDICACIONES']['extraer_de_whatsapp'] = 'si' if self.var_fuente_whatsapp.get() else 'no'
+                self.config['PREDICACIONES']['extraer_de_carpeta'] = 'si' if self.var_fuente_carpeta.get() else 'no'
+                self.config['PREDICACIONES']['carpeta_predicaciones'] = self.var_carpeta_predicaciones.get().strip()
 
             if self.es_full:
                 if not self.config.has_section('ORACIONES'):
@@ -124,6 +137,36 @@ class ConfiguradorGUI:
                             "🙏 Hola, te invito a un momento de oración. ¡Oremos juntos!\n"
                             "🙏 Amigo/a, ¿podemos orar juntos un momento? ¡Dios tiene algo para ti hoy!\n"
                         )
+
+            if self.es_full:
+                if not self.config.has_section('CORREO'):
+                    self.config.add_section('CORREO')
+                remitente = self.var_correo_remitente.get().strip()
+                self.config['CORREO']['proveedor'] = self.var_correo_proveedor.get()
+                self.config['CORREO']['servidor'] = self.var_correo_servidor.get().strip()
+                self.config['CORREO']['puerto'] = self.var_correo_puerto.get().strip()
+                self.config['CORREO']['seguridad'] = PROVEEDORES.get(self.var_correo_proveedor.get(), PROVEEDORES['otro'])[3] \
+                    if self.var_correo_proveedor.get() != 'otro' else self.config['CORREO'].get('seguridad', 'starttls')
+                self.config['CORREO']['remitente'] = remitente
+                self.config['CORREO']['nombre_remitente'] = self.var_correo_nombre.get().strip()
+                self.config['CORREO']['asunto'] = self.var_correo_asunto.get().strip() or '{titulo}'
+                if not self.var_correo_biblicos.get() and not self.var_correo_predicas.get():
+                    messagebox.showerror("❌ Correo", "Marca al menos una opción en 'Qué enviar por correo'")
+                    return
+                self.config['CORREO']['enviar_biblicos'] = 'si' if self.var_correo_biblicos.get() else 'no'
+                self.config['CORREO']['enviar_predicas'] = 'si' if self.var_correo_predicas.get() else 'no'
+                if remitente and '@' not in remitente:
+                    messagebox.showerror("❌ Correo", "Escribe el correo completo, por ejemplo nombre@gmail.com")
+                    return
+                contrasena = self.var_correo_contrasena.get().replace(' ', '')
+                if contrasena:
+                    if not remitente:
+                        messagebox.showerror("❌ Correo", "Escribe el correo que envía antes de guardar la contraseña")
+                        return
+                    if not guardar_contrasena(remitente, contrasena):
+                        messagebox.showerror("❌ Correo", "Windows no pudo guardar la contraseña del correo")
+                        return
+                    self.var_correo_contrasena.set('')
 
             self.config['NAVEGADOR']['usar_perfil_existente'] = self.var_usar_perfil.get()
             self.config['NAVEGADOR']['maximizar_ventana'] = self.var_maximizar.get()
@@ -175,6 +218,11 @@ class ConfiguradorGUI:
                 archivo_msg = os.path.join(self.base_dir, 'llamados-oracion', 'mensajes_oracion.txt')
                 if not os.path.exists(archivo_msg):
                     advertencias.append("• No hay mensajes de oración configurados (pestaña Oraciones)")
+
+                if 'correo' in lista_seq:
+                    problema_correo = falta_configuracion_correo()
+                    if problema_correo:
+                        advertencias.append(f"• {problema_correo} (pestaña Correo)")
 
                 if advertencias:
                     texto = "Configuración guardada, pero hay items pendientes:\n\n"
@@ -335,9 +383,9 @@ class ConfiguradorGUI:
 
         # ==================== PESTAÑA EXTRACTOR WHATSAPP ====================
         tab_pred = ttk.Frame(notebook)
-        notebook.add(tab_pred, text="🎬 Extractor WhatsApp")
+        notebook.add(tab_pred, text="🎬 Extractor")
 
-        tk.Label(tab_pred, text="Configuración para extraer predicaciones de un grupo de WhatsApp",
+        tk.Label(tab_pred, text="De dónde se extraen los enlaces de predicaciones: un grupo de WhatsApp y/o una carpeta de archivos",
                  font=("Segoe UI", 9), fg="#555", bg="#f0f0f0").pack(anchor='w', padx=20, pady=(10, 0))
 
         if not self.es_full:
@@ -345,6 +393,36 @@ class ConfiguradorGUI:
             banner_pred.pack(fill='x', padx=20, pady=(8, 0))
             tk.Label(banner_pred, text="🔒 Estas funciones están disponibles en la versión Completa",
                      font=("Segoe UI", 9, "bold"), fg="#856404", bg="#fff3cd").pack()
+
+        estado_pred = 'normal' if self.es_full else 'disabled'
+        self._seccion(tab_pred, "📂 Fuentes de predicaciones")
+        self.var_fuente_whatsapp = tk.BooleanVar(value=self._get('PREDICACIONES', 'extraer_de_whatsapp', 'si') == 'si')
+        self.var_fuente_carpeta = tk.BooleanVar(value=self._get('PREDICACIONES', 'extraer_de_carpeta', 'no') == 'si')
+        self.var_carpeta_predicaciones = tk.StringVar(value=self._get('PREDICACIONES', 'carpeta_predicaciones', ''))
+        fila_fuentes = tk.Frame(tab_pred, bg="#f0f0f0")
+        fila_fuentes.pack(anchor='w', padx=20)
+        tk.Checkbutton(fila_fuentes, text="💬 Grupo de WhatsApp", variable=self.var_fuente_whatsapp, bg="#f0f0f0",
+                       font=("Segoe UI", 10), state=estado_pred).pack(side='left', padx=(0, 15))
+        tk.Checkbutton(fila_fuentes, text="📁 Carpeta de archivos (.txt, .docx)", variable=self.var_fuente_carpeta,
+                       bg="#f0f0f0", font=("Segoe UI", 10), state=estado_pred).pack(side='left')
+        fila_carpeta = tk.Frame(tab_pred, bg="#f0f0f0")
+        fila_carpeta.pack(anchor='w', padx=20, pady=(4, 0))
+        tk.Entry(fila_carpeta, textvariable=self.var_carpeta_predicaciones, width=52, font=("Segoe UI", 9),
+                 state=estado_pred).pack(side='left')
+
+        def elegir_carpeta():
+            from tkinter import filedialog
+            ruta = filedialog.askdirectory(parent=self.root, title="Carpeta con archivos de predicaciones",
+                                           initialdir=self.var_carpeta_predicaciones.get() or None)
+            if ruta:
+                self.var_carpeta_predicaciones.set(os.path.normpath(ruta))
+                self.var_fuente_carpeta.set(True)
+
+        tk.Button(fila_carpeta, text="📁 Elegir…", font=("Segoe UI", 9), state=estado_pred,
+                  command=elegir_carpeta).pack(side='left', padx=(8, 0))
+        tk.Label(tab_pred, text="Puede ser una carpeta de Google Drive para escritorio (ej. G:\\Mi unidad\\Prédicas). "
+                                "Con ambas fuentes, primero revisa la carpeta y luego WhatsApp si faltan prédicas.",
+                 font=("Segoe UI", 8), fg="gray", bg="#f0f0f0", wraplength=620, justify='left').pack(anchor='w', padx=20, pady=(2, 4))
 
         self._seccion(tab_pred, "👥 Nombre del grupo de WhatsApp (ORIGEN de predicaciones)")
         tk.Label(tab_pred, text="⚠️  Debe ser EXACTAMENTE igual a como aparece en WhatsApp", font=("Segoe UI", 8), fg="gray", bg="#f0f0f0").pack(anchor='w', padx=20)
@@ -426,6 +504,11 @@ class ConfiguradorGUI:
                 "🔒 Versión Completa", "Adquiere la versión Completa en automapro.com.")
         ).pack(fill='x', ipady=6)
 
+        # ==================== PESTAÑA CORREO ====================
+        tab_correo = ttk.Frame(notebook)
+        notebook.add(tab_correo, text="✉️ Correo")
+        self._construir_tab_correo(tab_correo)
+
         # ==================== PESTAÑA SECUENCIA ====================
         if self.es_full:
             tab_seq = ttk.Frame(notebook)
@@ -451,9 +534,10 @@ class ConfiguradorGUI:
 
             modulos_disponibles = [
                 ("biblico",          "▶️  Publicar Mensaje Bíblico en Facebook"),
-                ("extraer",          "🎬  Extraer Predicaciones de WhatsApp"),
+                ("extraer",          "🎬  Extraer Predicaciones (WhatsApp / carpeta)"),
                 ("publicar_predica", "📤  Publicar Prédica Extraída en Facebook"),
                 ("oraciones",        "📱  Enviar Oraciones por WhatsApp"),
+                ("correo",           "✉️  Enviar Mensaje por Correo"),
             ]
 
             seq_guardada = self._get('SECUENCIA', 'modulos_activos', 'biblico,extraer,publicar_predica')
@@ -533,9 +617,11 @@ class ConfiguradorGUI:
         if self.pestana_inicial == 'extractor':
             notebook.select(tab_pred)
         elif self.pestana_inicial == 'oraciones':
-            notebook.select(3)
+            notebook.select(tab_ora)
+        elif self.pestana_inicial == 'correo':
+            notebook.select(tab_correo)
         elif self.pestana_inicial == 'secuencia' and self.es_full:
-            notebook.select(4)
+            notebook.select(tab_seq)
 
         # ==================== BOTONES ====================
         frame_botones = tk.Frame(self.root, bg="#f0f0f0", pady=8)
@@ -546,6 +632,260 @@ class ConfiguradorGUI:
 
         tk.Button(frame_botones, text="💾 Guardar", font=("Segoe UI", 10, "bold"),
                   bg="#1a73e8", fg="white", width=14, command=self._guardar_config).pack(side='right', padx=5)
+
+    def _construir_tab_correo(self, tab):
+        estado = 'normal' if self.es_full else 'disabled'
+        config_correo = leer_config_correo()
+
+        tk.Label(tab, text="Envía mensajes bíblicos y prédicas por correo a tu lista de destinatarios",
+                 font=("Segoe UI", 9), fg="#555", bg="#f0f0f0").pack(anchor='w', padx=20, pady=(10, 0))
+
+        if not self.es_full:
+            banner = tk.Frame(tab, bg="#fff3cd", pady=6)
+            banner.pack(fill='x', padx=20, pady=(8, 0))
+            tk.Label(banner, text="🔒 Estas funciones están disponibles en la versión Completa",
+                     font=("Segoe UI", 9, "bold"), fg="#856404", bg="#fff3cd").pack()
+
+        self._seccion(tab, "📧 Cuenta que envía los correos")
+        self.var_correo_proveedor = tk.StringVar(value=config_correo['proveedor'])
+        self.var_correo_servidor = tk.StringVar(value=config_correo['servidor'])
+        self.var_correo_puerto = tk.StringVar(value=str(config_correo['puerto']))
+        self.var_correo_remitente = tk.StringVar(value=config_correo['remitente'])
+        self.var_correo_nombre = tk.StringVar(value=config_correo['nombre_remitente'])
+        self.var_correo_asunto = tk.StringVar(value=config_correo['asunto'])
+        self.var_correo_contrasena = tk.StringVar()
+        self.var_correo_biblicos = tk.BooleanVar(value=config_correo['enviar_biblicos'])
+        self.var_correo_predicas = tk.BooleanVar(value=config_correo['enviar_predicas'])
+
+        def al_cambiar_proveedor():
+            proveedor = self.var_correo_proveedor.get()
+            if proveedor != 'otro':
+                _, servidor, puerto, _ = PROVEEDORES[proveedor]
+                self.var_correo_servidor.set(servidor)
+                self.var_correo_puerto.set(str(puerto))
+
+        fila_prov = tk.Frame(tab, bg="#f0f0f0")
+        fila_prov.pack(anchor='w', padx=20)
+        for clave, (nombre, _, _, _) in PROVEEDORES.items():
+            tk.Radiobutton(fila_prov, text=nombre, variable=self.var_correo_proveedor, value=clave, bg="#f0f0f0",
+                           font=("Segoe UI", 10), state=estado, command=al_cambiar_proveedor).pack(side='left', padx=(0, 12))
+
+        datos = tk.Frame(tab, bg="#f0f0f0")
+        datos.pack(anchor='w', padx=20, pady=(6, 0))
+        tiene_contrasena = bool(leer_contrasena()) if self.es_full else False
+        filas = [
+            ("Correo:", self.var_correo_remitente, None),
+            ("Nombre que verán:", self.var_correo_nombre, None),
+            ("Contraseña de aplicación:", self.var_correo_contrasena, '•'),
+            ("Asunto:", self.var_correo_asunto, None),
+        ]
+        for i, (texto, variable, oculto) in enumerate(filas):
+            tk.Label(datos, text=texto, font=("Segoe UI", 9), bg="#f0f0f0").grid(row=i, column=0, sticky='w', pady=2)
+            tk.Entry(datos, textvariable=variable, width=38, font=("Segoe UI", 10), show=oculto or '',
+                     state=estado).grid(row=i, column=1, sticky='w', padx=(8, 0), pady=2)
+        tk.Label(datos, text="✅ guardada en Windows (escribe otra solo para cambiarla)" if tiene_contrasena
+                 else "Se guarda cifrada en Windows. En Gmail se crea en myaccount.google.com/apppasswords",
+                 font=("Segoe UI", 8), fg="#28a745" if tiene_contrasena else "gray", bg="#f0f0f0",
+                 wraplength=330, justify='left').grid(row=5, column=1, sticky='w', padx=(8, 0))
+        tk.Label(datos, text="{titulo} = primera línea del mensaje", font=("Segoe UI", 8), fg="gray",
+                 bg="#f0f0f0").grid(row=6, column=1, sticky='w', padx=(8, 0))
+
+        fila_srv = tk.Frame(tab, bg="#f0f0f0")
+        fila_srv.pack(anchor='w', padx=20, pady=(6, 0))
+        tk.Label(fila_srv, text="Servidor:", font=("Segoe UI", 9), bg="#f0f0f0").pack(side='left')
+        tk.Entry(fila_srv, textvariable=self.var_correo_servidor, width=26, font=("Segoe UI", 9),
+                 state=estado).pack(side='left', padx=(6, 12))
+        tk.Label(fila_srv, text="Puerto:", font=("Segoe UI", 9), bg="#f0f0f0").pack(side='left')
+        tk.Entry(fila_srv, textvariable=self.var_correo_puerto, width=6, font=("Segoe UI", 9),
+                 state=estado).pack(side='left', padx=(6, 0))
+
+        self._seccion(tab, "📦 Qué enviar por correo")
+        fila_contenido = tk.Frame(tab, bg="#f0f0f0")
+        fila_contenido.pack(anchor='w', padx=20)
+        tk.Checkbutton(fila_contenido, text="📖 Mensajes bíblicos", variable=self.var_correo_biblicos, bg="#f0f0f0",
+                       font=("Segoe UI", 10), state=estado).pack(side='left', padx=(0, 15))
+        tk.Checkbutton(fila_contenido, text="🎬 Prédicas extraídas", variable=self.var_correo_predicas, bg="#f0f0f0",
+                       font=("Segoe UI", 10), state=estado).pack(side='left')
+        tk.Label(tab, text="Envía lo mismo que se publicó en Facebook en esa ejecución. Si no se publicó nada, "
+                           "elige un mensaje y la siguiente prédica aún no enviada (sin quitársela a Facebook)",
+                 font=("Segoe UI", 8), fg="gray", bg="#f0f0f0", wraplength=620, justify='left').pack(anchor='w', padx=20)
+
+        def probar():
+            proveedor = self.var_correo_proveedor.get()
+            seguridad = PROVEEDORES.get(proveedor, PROVEEDORES['otro'])[3] if proveedor != 'otro' \
+                else leer_config_correo()['seguridad']
+            try:
+                puerto = int(self.var_correo_puerto.get())
+            except ValueError:
+                messagebox.showerror("❌ Correo", "El puerto debe ser un número", parent=self.root)
+                return
+            config = {
+                'servidor': self.var_correo_servidor.get().strip(), 'puerto': puerto, 'seguridad': seguridad,
+                'remitente': self.var_correo_remitente.get().strip(), 'nombre_remitente': self.var_correo_nombre.get().strip(),
+            }
+            contrasena = self.var_correo_contrasena.get().replace(' ', '') or leer_contrasena()
+            if not config['remitente'] or not contrasena:
+                messagebox.showerror("❌ Correo", "Escribe el correo y la contraseña de aplicación", parent=self.root)
+                return
+            if '@' not in config['remitente']:
+                messagebox.showerror("❌ Correo", "Escribe el correo completo, por ejemplo nombre@gmail.com", parent=self.root)
+                return
+            self.root.config(cursor='wait')
+            self.root.update()
+            ok, mensaje = probar_conexion(config, contrasena)
+            self.root.config(cursor='')
+            (messagebox.showinfo if ok else messagebox.showerror)("✉️ Prueba de correo", mensaje, parent=self.root)
+
+        botones = tk.Frame(tab, bg="#f0f0f0")
+        botones.pack(fill='x', padx=20, pady=(10, 0))
+        tk.Button(botones, text="🧪  Probar conexión", font=("Segoe UI", 10, "bold"),
+                  bg="#17a2b8" if self.es_full else "#e0e0e0", fg="white" if self.es_full else "#9e9e9e",
+                  state=estado, command=probar).pack(side='left', fill='x', expand=True, padx=(0, 6), ipady=4)
+        tk.Button(botones, text="👥  Destinatarios de correo", font=("Segoe UI", 10, "bold"),
+                  bg="#1a73e8" if self.es_full else "#e0e0e0", fg="white" if self.es_full else "#9e9e9e",
+                  state=estado, command=self._abrir_gestor_destinatarios_correo).pack(side='left', fill='x', expand=True, ipady=4)
+
+    def _abrir_gestor_destinatarios_correo(self):
+        ventana = tk.Toplevel(self.root)
+        ventana.withdraw()
+        ventana.title("👥 Destinatarios de correo")
+        ventana.resizable(False, False)
+        ventana.configure(bg="#f0f0f0")
+        ventana.transient(self.root)
+
+        header = tk.Frame(ventana, bg="#1a73e8", pady=12)
+        header.pack(fill='x')
+        tk.Label(header, text="👥 Destinatarios de correo",
+                 font=("Segoe UI", 12, "bold"), bg="#1a73e8", fg="white").pack()
+        tk.Label(header, text="✅ = recibe por defecto · Doble clic para cambiarlo · Editar para corregir un correo",
+                 font=("Segoe UI", 8), bg="#1a73e8", fg="#cce0ff").pack()
+
+        frame = tk.Frame(ventana, bg="#f0f0f0", padx=20, pady=10)
+        frame.pack(fill='both', expand=True)
+
+        var_email = tk.StringVar()
+        var_nombre = tk.StringVar()
+        fila_nueva = tk.Frame(frame, bg="#f0f0f0")
+        fila_nueva.pack(fill='x', pady=(0, 8))
+        tk.Label(fila_nueva, text="Correo:", font=("Segoe UI", 9), bg="#f0f0f0").grid(row=0, column=0, sticky='w')
+        entrada_email = tk.Entry(fila_nueva, textvariable=var_email, width=26, font=("Segoe UI", 10))
+        entrada_email.grid(row=0, column=1, padx=(6, 0), pady=2)
+        tk.Label(fila_nueva, text="Nombre:", font=("Segoe UI", 9), bg="#f0f0f0").grid(row=1, column=0, sticky='w')
+        tk.Entry(fila_nueva, textvariable=var_nombre, width=26, font=("Segoe UI", 10)).grid(row=1, column=1, padx=(6, 0), pady=2)
+
+        frame_lista = tk.Frame(frame, bg="#f0f0f0")
+        frame_lista.pack(fill='both', expand=True)
+        scrollbar = tk.Scrollbar(frame_lista)
+        scrollbar.pack(side='right', fill='y')
+        lista = tk.Listbox(frame_lista, yscrollcommand=scrollbar.set,
+                           font=("Segoe UI", 10), height=9, bg="white", relief='solid', borderwidth=1)
+        lista.pack(side='left', fill='both', expand=True)
+        scrollbar.config(command=lista.yview)
+
+        destinatarios = leer_destinatarios_correo()
+        estado = {'editando': None}
+
+        def cargar():
+            lista.delete(0, tk.END)
+            for d in destinatarios:
+                marca = "✅" if d.get('seleccionado', True) else "⬜"
+                nombre = f" — {d['nombre']}" if d.get('nombre') else ""
+                lista.insert(tk.END, f"{marca} {d['email']}{nombre}")
+
+        def guardar():
+            try:
+                guardar_destinatarios_correo(destinatarios)
+            except Exception as e:
+                messagebox.showerror("❌ Error", f"No se pudo guardar: {e}", parent=ventana)
+
+        def limpiar_campos():
+            estado['editando'] = None
+            boton_agregar.config(text="+ Agregar")
+            var_email.set('')
+            var_nombre.set('')
+            entrada_email.focus_set()
+
+        def agregar():
+            email = var_email.get().strip().lower()
+            if '@' not in email or '.' not in email.split('@')[-1] or ' ' in email:
+                messagebox.showwarning("⚠️ Aviso", "Escribe un correo válido", parent=ventana)
+                return
+            editando = estado['editando']
+            if any(d['email'] == email for i, d in enumerate(destinatarios) if i != editando):
+                messagebox.showwarning("⚠️ Aviso", "Ese correo ya está en la lista", parent=ventana)
+                return
+            if editando is None:
+                destinatarios.append({'email': email, 'nombre': var_nombre.get().strip(), 'seleccionado': True})
+            else:
+                destinatarios[editando]['email'] = email
+                destinatarios[editando]['nombre'] = var_nombre.get().strip()
+            guardar()
+            cargar()
+            limpiar_campos()
+
+        def editar():
+            sel = lista.curselection()
+            if not sel:
+                messagebox.showinfo("ℹ️ Destinatarios", "Primero haz clic en un correo de la lista", parent=ventana)
+                return
+            estado['editando'] = sel[0]
+            var_email.set(destinatarios[sel[0]]['email'])
+            var_nombre.set(destinatarios[sel[0]].get('nombre', ''))
+            boton_agregar.config(text="💾 Guardar")
+            entrada_email.focus_set()
+
+        def alternar(event=None):
+            sel = lista.curselection()
+            if not sel and event is None:
+                messagebox.showinfo("ℹ️ Destinatarios", "Primero haz clic en un correo de la lista", parent=ventana)
+            if sel:
+                d = destinatarios[sel[0]]
+                d['seleccionado'] = not d.get('seleccionado', True)
+                guardar()
+                cargar()
+                lista.selection_set(sel[0])
+
+        def eliminar():
+            sel = lista.curselection()
+            if not sel:
+                messagebox.showwarning("⚠️ Aviso", "Selecciona un correo para eliminar", parent=ventana)
+                return
+            if messagebox.askyesno("🗑️ Confirmar", f"¿Eliminar '{destinatarios[sel[0]]['email']}'?", parent=ventana):
+                destinatarios.pop(sel[0])
+                guardar()
+                cargar()
+                limpiar_campos()
+
+        def cerrar():
+            ventana.grab_release()
+            ventana.destroy()
+
+        boton_agregar = tk.Button(fila_nueva, text="+ Agregar", font=("Segoe UI", 10, "bold"), bg="#1a73e8", fg="white",
+                                  command=agregar, width=10)
+        boton_agregar.grid(row=0, column=2, rowspan=2, padx=(10, 0), sticky='ns')
+        lista.bind('<Double-Button-1>', alternar)
+        entrada_email.bind('<Return>', lambda e: agregar())
+
+        frame_btns = tk.Frame(frame, bg="#f0f0f0")
+        frame_btns.pack(fill='x', pady=(8, 0))
+        tk.Button(frame_btns, text="✅/⬜ Por defecto", font=("Segoe UI", 10), bg="#17a2b8", fg="white",
+                  command=alternar, width=16).pack(side='left', padx=(0, 5), ipady=4)
+        tk.Button(frame_btns, text="Editar", font=("Segoe UI", 10), bg="#ffc107",
+                  command=editar, width=9).pack(side='left', padx=(0, 5), ipady=4)
+        tk.Button(frame_btns, text="Eliminar", font=("Segoe UI", 10), bg="#dc3545", fg="white",
+                  command=eliminar, width=9).pack(side='left', ipady=4)
+        tk.Button(frame_btns, text="Cerrar", font=("Segoe UI", 10), bg="#6c757d", fg="white",
+                  command=cerrar, width=10).pack(side='right', ipady=4)
+        ventana.protocol("WM_DELETE_WINDOW", cerrar)
+
+        cargar()
+        ventana.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - 260
+        y = (self.root.winfo_screenheight() // 2) - 230
+        ventana.geometry(f'520x460+{x}+{y}')
+        ventana.deiconify()
+        ventana.grab_set()
+        entrada_email.focus_set()
 
     def _abrir_gestor_grupos(self):
         ventana = tk.Toplevel(self.root)

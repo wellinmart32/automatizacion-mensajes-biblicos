@@ -16,6 +16,7 @@ from compartido.gestor_archivos import (
     listar_mensajes_con_titulo,
     MODULOS_DISPONIBLES
 )
+from publicadores.publicador_correo import leer_destinatarios_correo
 from compartido.selector_destinatarios import SelectorDestinatarios
 
 
@@ -615,7 +616,7 @@ class GestorTareasGUI:
                 subprocess.run(['schtasks', '/Delete', '/TN', nombre_completo, '/F'], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             
             guardar_config_tarea(self._id_de(nombre), nombre, acciones['modulos'], acciones['destinatarios'],
-                                 acciones['cantidad'], acciones['mensajes_fijos'])
+                                 acciones['cantidad'], acciones['mensajes_fijos'], acciones['destinatarios_correo'])
             ventana.destroy()
             self._crear_tarea_windows(nombre, frecuencia, horario, dias_selec if frecuencia == "WEEKLY" else None, mostrar_aviso_hora)
             
@@ -626,8 +627,8 @@ class GestorTareasGUI:
         tk.Button(frame_btns, text=texto_boton, font=("Segoe UI", 10, "bold"), bg="#28a745", fg="white", width=18, command=guardar).pack(side='right', padx=(10, 30))
         
         x = (ventana.winfo_screenwidth() // 2) - 300
-        y = (ventana.winfo_screenheight() // 2) - 320
-        ventana.geometry(f'600x640+{x}+{y}')
+        y = (ventana.winfo_screenheight() // 2) - 375
+        ventana.geometry(f'600x750+{x}+{y}')
         ventana.deiconify()
 
     def _crear_tarea_windows(self, nombre, frecuencia, horario, dias=None, ya_mostro_aviso=False):
@@ -719,17 +720,20 @@ class GestorTareasGUI:
             destinatarios = config_tarea.get('destinatarios')
             cantidad = config_tarea.get('cantidad')
             mensajes_fijos = config_tarea.get('mensajes_fijos')
+            destinatarios_correo = config_tarea.get('destinatarios_correo')
         else:
             activos = modulos_secuencia_general()
             destinatarios = None
             cantidad = None
             mensajes_fijos = None
+            destinatarios_correo = None
 
         nombres = dict(MODULOS_DISPONIBLES)
         estado = {
             'orden': [m for m in activos if m in nombres] + [m for m in nombres if m not in activos],
             'destinatarios': destinatarios,
-            'mensajes_fijos': list(mensajes_fijos or [])
+            'mensajes_fijos': list(mensajes_fijos or []),
+            'destinatarios_correo': list(destinatarios_correo or [])
         }
         vars_activos = {m: tk.BooleanVar(value=m in activos) for m in nombres}
 
@@ -782,7 +786,10 @@ class GestorTareasGUI:
 
         def elegir_fijos():
             formulario = tab.winfo_toplevel()
-            elegidos = self._elegir_mensajes_fijos(formulario, estado['mensajes_fijos'])
+            elegidos = self._elegir_con_casillas(
+                formulario, "📌 Mensajes fijos de esta tarea", "Marca los mensajes que esta tarea publicará siempre",
+                [(archivo, f"{archivo[:-4]}  ·  {titulo[:60]}") for archivo, titulo in listar_mensajes_con_titulo()],
+                estado['mensajes_fijos'])
             formulario.grab_set()
             if elegidos is not None:
                 estado['mensajes_fijos'] = elegidos
@@ -836,6 +843,45 @@ class GestorTareasGUI:
         lbl_elegidos.pack(side='left')
         actualizar_elegidos()
 
+        tk.Label(tab, text="✉️ Destinatarios de correo", font=("Segoe UI", 10, "bold"),
+                 bg="#f0f0f0").pack(anchor='w', padx=15, pady=(10, 4))
+        var_modo_correo = tk.StringVar(value='propios' if destinatarios_correo else 'defecto')
+        tk.Radiobutton(tab, text="Usar los destinatarios por defecto", variable=var_modo_correo, value='defecto',
+                       bg="#f0f0f0", font=("Segoe UI", 10)).pack(anchor='w', padx=25)
+
+        fila_correo = tk.Frame(tab, bg="#f0f0f0")
+        fila_correo.pack(anchor='w', padx=25, fill='x')
+        tk.Radiobutton(fila_correo, text="Elegir para esta tarea", variable=var_modo_correo, value='propios',
+                       bg="#f0f0f0", font=("Segoe UI", 10)).pack(side='left')
+        lbl_correo = tk.Label(fila_correo, font=("Segoe UI", 9), fg="#555", bg="#f0f0f0")
+
+        def actualizar_correo():
+            total = len(estado['destinatarios_correo'])
+            lbl_correo.config(text=f"{total} elegido(s)" if total else "ninguno elegido")
+
+        def elegir_correo():
+            formulario = tab.winfo_toplevel()
+            opciones = [(d['email'], f"{d['email']}  ·  {d['nombre']}" if d.get('nombre') else d['email'])
+                        for d in leer_destinatarios_correo()]
+            if not opciones:
+                messagebox.showinfo("✉️ Sin destinatarios",
+                                    "Aún no hay destinatarios de correo.\n\n"
+                                    "Agrégalos en el Configurador → pestaña ✉️ Correo.", parent=formulario)
+                return
+            elegidos = self._elegir_con_casillas(
+                formulario, "✉️ Correos de esta tarea", "Solo esta tarea enviará el correo a los que marques",
+                opciones, estado['destinatarios_correo'])
+            formulario.grab_set()
+            if elegidos is not None:
+                estado['destinatarios_correo'] = elegidos
+                var_modo_correo.set('propios')
+                actualizar_correo()
+
+        tk.Button(fila_correo, text="✅ Elegir…", font=("Segoe UI", 9), bg="#6f42c1", fg="white",
+                  command=elegir_correo).pack(side='left', padx=(10, 6))
+        lbl_correo.pack(side='left')
+        actualizar_correo()
+
         def obtener():
             modulos = [m for m in estado['orden'] if vars_activos[m].get()]
             if not modulos:
@@ -850,29 +896,34 @@ class GestorTareasGUI:
                 messagebox.showerror("Error", "Elegiste destinatarios propios pero no hay ninguno marcado.\n\n"
                                      "Presiona '✅ Elegir…' o usa los destinatarios por defecto.", parent=tab)
                 return None
+            usa_correo_propio = var_modo_correo.get() == 'propios'
+            if usa_correo_propio and not estado['destinatarios_correo']:
+                messagebox.showerror("Error", "Elegiste correos propios pero no hay ninguno marcado.\n\n"
+                                     "Presiona '✅ Elegir…' o usa los destinatarios por defecto.", parent=tab)
+                return None
             return {
                 'modulos': modulos,
                 'destinatarios': estado['destinatarios'] if usa_propios else None,
                 'cantidad': None if var_cantidad.get() == opcion_general else int(var_cantidad.get()),
-                'mensajes_fijos': estado['mensajes_fijos'] or None
+                'mensajes_fijos': estado['mensajes_fijos'] or None,
+                'destinatarios_correo': estado['destinatarios_correo'] if usa_correo_propio else None
             }
 
         return obtener
 
-    def _elegir_mensajes_fijos(self, padre, preseleccion):
-        """Ventana con casillas para marcar los mensajes fijos de una tarea. Retorna la lista o None si se cancela"""
-        mensajes = listar_mensajes_con_titulo()
+    def _elegir_con_casillas(self, padre, titulo, subtitulo, opciones, preseleccion):
+        """Ventana con casillas; opciones = [(clave, texto)]. Retorna las claves marcadas o None si se cancela"""
         resultado = {'valor': None}
 
         ventana = tk.Toplevel(padre)
         ventana.withdraw()
-        ventana.title("📌 Mensajes fijos de esta tarea")
+        ventana.title(titulo)
         ventana.configure(bg="#f0f0f0")
         ventana.transient(padre)
 
-        tk.Label(ventana, text="Marca los mensajes que esta tarea publicará siempre",
+        tk.Label(ventana, text=subtitulo,
                  font=("Segoe UI", 10, "bold"), bg="#f0f0f0").pack(anchor='w', padx=15, pady=(12, 2))
-        tk.Label(ventana, text="Ninguno marcado = la tarea usa la rotación normal",
+        tk.Label(ventana, text="Ninguno marcado = la tarea usa lo de por defecto",
                  font=("Segoe UI", 8), fg="#555", bg="#f0f0f0").pack(anchor='w', padx=15, pady=(0, 6))
 
         marco = tk.Frame(ventana, bg="white", relief='solid', borderwidth=1)
@@ -888,9 +939,9 @@ class GestorTareasGUI:
         lienzo.bind_all('<MouseWheel>', lambda e: lienzo.yview_scroll(int(-e.delta / 120), 'units'))
 
         variables = {}
-        for archivo, titulo in mensajes:
-            variables[archivo] = tk.BooleanVar(value=archivo in (preseleccion or []))
-            tk.Checkbutton(interior, text=f"{archivo[:-4]}  ·  {titulo[:60]}", variable=variables[archivo],
+        for clave, texto in opciones:
+            variables[clave] = tk.BooleanVar(value=clave in (preseleccion or []))
+            tk.Checkbutton(interior, text=texto, variable=variables[clave],
                            font=("Segoe UI", 9), bg="white", anchor='w').pack(fill='x', padx=6)
 
         def aceptar():
@@ -931,7 +982,8 @@ class GestorTareasGUI:
         config_tarea = obtener_config_tarea(id_de_tarea)
         if not config_tarea:
             return "Secuencia general"
-        cortos = {'biblico': 'Bíblico', 'extraer': 'Extraer', 'publicar_predica': 'Prédica', 'oraciones': 'Oraciones'}
+        cortos = {'biblico': 'Bíblico', 'extraer': 'Extraer', 'publicar_predica': 'Prédica', 'oraciones': 'Oraciones',
+                  'correo': 'Correo'}
         partes = []
         for modulo in config_tarea.get('modulos', []):
             texto = cortos.get(modulo, modulo)
@@ -941,6 +993,8 @@ class GestorTareasGUI:
                 texto += f" ({config_tarea['cantidad']})"
             if modulo == 'oraciones' and config_tarea.get('destinatarios'):
                 texto += f" ({len(config_tarea['destinatarios'])})"
+            if modulo == 'correo' and config_tarea.get('destinatarios_correo'):
+                texto += f" ({len(config_tarea['destinatarios_correo'])})"
             partes.append(texto)
         return ", ".join(partes) if partes else "Sin acciones"
 

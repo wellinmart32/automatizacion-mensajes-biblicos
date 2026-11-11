@@ -20,6 +20,13 @@ tareas_programadas.json
 registro_tareas.log
 aviso_actualizacion.json
 
+# Ignorar configuración personal (correo, grupo, navegador de cada equipo)
+# El instalador y el desarrollo parten de config_global.ejemplo.txt
+config_global.txt
+
+# Ignorar destinatarios y registro de envíos por correo (datos personales)
+correo/
+
 # Ignorar grupos reales de WhatsApp (datos personales)
 # El cliente recibe grupos.ejemplo.json como plantilla
 llamados-oracion/grupos.json

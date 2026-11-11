@@ -14,7 +14,7 @@ echo.
 pause
 
 set PYINSTALLER=py -m PyInstaller
-set DATOS_BASE=--add-data "compartido;compartido" --add-data "iconos;iconos" --add-data "config_global.txt;." --add-data "version.txt;."
+set DATOS_BASE=--add-data "compartido;compartido" --add-data "iconos;iconos" --add-data "version.txt;."
 set FLAGS=--onefile --windowed --noconfirm
 set FLAGS_CONSOLA=--onefile --noconfirm
 

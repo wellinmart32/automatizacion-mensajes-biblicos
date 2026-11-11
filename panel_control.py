@@ -5,7 +5,7 @@ from tkinter import messagebox
 import subprocess
 from gestor_licencias import GestorLicencias
 from gestor_registro import GestorRegistro
-from compartido.gestor_archivos import migrar_tareas_antiguas
+from compartido.gestor_archivos import migrar_tareas_antiguas, problema_fuentes_predicaciones
 from compartido.toast import Toast
 
 
@@ -540,10 +540,10 @@ class PanelControl:
             command=lambda: [ventana.destroy(), self._enviar_oraciones()] if es_full else self._mostrar_mensaje_upgrade()
         ).pack(fill='x', pady=(0, 8))
 
-        # Acción 3 — Extraer Predicaciones de WhatsApp
+        # Acción 3 — Extraer Predicaciones
         tk.Button(
             frame,
-            text="🎬  Extraer Predicaciones de WhatsApp" if es_full else "🔒  Extraer Predicaciones de WhatsApp  —  versión Completa",
+            text="🎬  Extraer Predicaciones" if es_full else "🔒  Extraer Predicaciones  —  versión Completa",
             font=("Segoe UI", 11, "bold") if es_full else ("Segoe UI", 11),
             bg="#25D366" if es_full else "#e0e0e0",
             fg="white" if es_full else "#9e9e9e",
@@ -577,7 +577,21 @@ class PanelControl:
             command=cmd_pred
         ).pack(fill='x', pady=(0, 8))
 
-        # Acción 5 — Ejecutar Secuencia Configurada
+        # Acción 5 — Enviar Mensaje por Correo
+        tk.Button(
+            frame,
+            text="✉️  Enviar Mensaje por Correo" if es_full else "🔒  Enviar Mensaje por Correo  —  versión Completa",
+            font=("Segoe UI", 11, "bold") if es_full else ("Segoe UI", 11),
+            bg="#6f42c1" if es_full else "#e0e0e0",
+            fg="white" if es_full else "#9e9e9e",
+            cursor="hand2",
+            anchor='w',
+            padx=15,
+            pady=8,
+            command=lambda: [ventana.destroy(), self._enviar_correo()] if es_full else self._mostrar_mensaje_upgrade()
+        ).pack(fill='x', pady=(0, 8))
+
+        # Acción 6 — Ejecutar Secuencia Configurada
         if es_full:
             tk.Button(
                 frame,
@@ -616,7 +630,7 @@ class PanelControl:
             command=ventana.destroy
         ).pack(pady=15)
 
-        self._centrar_ventana(ventana, 500, 470)
+        self._centrar_ventana(ventana, 500, 525)
         ventana.deiconify()
 
     # ==================== ACCIONES ====================
@@ -650,14 +664,12 @@ class PanelControl:
         lista = [m.strip() for m in modulos.split(',') if m.strip()]
 
         # Validar configuración antes de ejecutar
-        necesita_grupo = 'extraer' in lista or 'publicar_predica' in lista
-        if necesita_grupo:
-            grupo = cfg.get('PREDICACIONES', 'nombre_grupo_whatsapp', fallback='').strip()
-            if not grupo:
+        if 'extraer' in lista:
+            problema = problema_fuentes_predicaciones()
+            if problema:
                 respuesta = messagebox.askyesno(
                     "⚠️ Configuración incompleta",
-                    "La secuencia incluye 'Extraer Predicaciones' pero no has configurado\n"
-                    "el nombre del grupo de WhatsApp.\n\n"
+                    f"La secuencia incluye 'Extraer Predicaciones':\n{problema}.\n\n"
                     "¿Deseas ir al Configurador para completarlo ahora?"
                 )
                 if respuesta:
@@ -684,6 +696,24 @@ class PanelControl:
             self._toast("🚀 Publicación iniciada", "El navegador se abrirá en unos segundos...")
         except Exception as e:
             messagebox.showerror("❌ Error", f"No se pudo iniciar la publicación:\n{e}")
+
+    def _enviar_correo(self):
+        from publicadores.publicador_correo import falta_configuracion_correo
+        problema = falta_configuracion_correo()
+        if problema:
+            if messagebox.askyesno("⚠️ Correo sin configurar",
+                                   f"{problema}.\n\n¿Deseas abrir el Configurador para completarlo ahora?"):
+                self._abrir_configurador(pestana='correo')
+            return
+        try:
+            exe = self._exe("MensajesBiblicos.exe")
+            if os.path.exists(exe):
+                subprocess.Popen([exe, "--modulo", "correo"])
+            else:
+                subprocess.Popen([sys.executable, "publicar_facebook.py", "--modulo", "correo"])
+            self._toast("✉️ Envío iniciado", "Se enviará el mensaje a tus destinatarios de correo")
+        except Exception as e:
+            messagebox.showerror("❌ Error", f"No se pudo iniciar el envío:\n{e}")
 
     def _enviar_oraciones(self):
         """Abre la selección de destinatarios para este envío de oraciones"""
@@ -891,18 +921,12 @@ class PanelControl:
             messagebox.showerror("❌ Error", f"No se pudo abrir el configurador:\n{e}")
 
     def _extraer_predicaciones(self):
-        # Verificar si el grupo está configurado antes de lanzar el exe
-        archivo_config = os.path.join(self.base_dir, "config_global.txt")
-        import configparser as _cp
-        cfg = _cp.ConfigParser()
-        cfg.read(archivo_config, encoding='utf-8')
-        nombre_actual = cfg.get('PREDICACIONES', 'nombre_grupo_whatsapp', fallback='Prédicas').strip()
-
-        if not nombre_actual:
+        # Verificar las fuentes (grupo de WhatsApp y/o carpeta) antes de lanzar el exe
+        problema = problema_fuentes_predicaciones()
+        if problema:
             respuesta = messagebox.askokcancel(
-                "⚠️ Grupo no configurado",
-                "No has configurado el nombre del grupo de WhatsApp\n"
-                "del cual se extraen las predicaciones.\n\n"
+                "⚠️ Extractor sin configurar",
+                f"{problema}.\n\n"
                 "¿Deseas abrir el Configurador para completarlo ahora?"
             )
             if respuesta:
@@ -918,7 +942,7 @@ class PanelControl:
                 subprocess.Popen([exe])
             else:
                 subprocess.Popen([sys.executable, "extraer_predicaciones_whatsapp.py"])
-            self._toast("🎬 Extrayendo predicaciones", "Iniciando extracción de WhatsApp...")
+            self._toast("🎬 Extrayendo predicaciones", "Buscando prédicas nuevas...")
         except Exception as e:
             messagebox.showerror("❌ Error", f"No se pudo iniciar el módulo:\n{e}")
 
@@ -938,7 +962,7 @@ class PanelControl:
         messagebox.showinfo(
             "Sin predicaciones",
             "No hay predicaciones extraídas.\n\n"
-            "Primero usa 'Extraer Predicaciones de WhatsApp'\n"
+            "Primero usa 'Extraer Predicaciones'\n"
             "y luego podrás publicarlas en Facebook."
         )
 
@@ -992,7 +1016,7 @@ class PanelControl:
             "Esta función está disponible solo en la versión Completa.\n\n"
             "Adquiérela en automapro.com para desbloquear:\n"
             "• Enviar Oraciones por WhatsApp\n"
-            "• Extraer Predicaciones de WhatsApp\n"
+            "• Extraer Predicaciones\n"
             "• Publicar Predicaciones en Facebook\n"
             "• Tareas Automáticas"
         )
@@ -1065,25 +1089,25 @@ class PanelControl:
         TEMAS = [
             ("▶️  Publicar Mensaje Bíblico",
              "▶️ PUBLICAR MENSAJE BÍBLICO EN FACEBOOK\n\n"
-             "Publica automáticamente mensajes bíblicos en tu página o perfil de Facebook.\n\n"
+             "Publica automáticamente mensajes bíblicos en tu perfil de Facebook.\n\n"
              "¿Qué hace?\n"
-             "• Abre el navegador configurado (Firefox, Chrome o Edge)\n"
-             "• Inicia sesión usando tu perfil guardado\n"
-             "• Elige los mensajes de tu carpeta 'mensajes/' según el modo configurado\n"
+             "• Abre el navegador configurado (Firefox, Chrome o Edge) con su propia ventana de consola\n"
+             "• Usa tu sesión de Facebook guardada (aunque tengas ese navegador abierto)\n"
+             "• Elige los mensajes de tu carpeta 'mensajes' según el modo configurado\n"
              "• Publica la cantidad configurada (1 por defecto), esperando el tiempo mínimo entre cada uno\n"
-             "• Registra la actividad de cada publicación\n\n"
+             "• Los enlaces (https://...) salen clicables y con vista previa\n"
+             "• Registra cada publicación en las Estadísticas\n\n"
              "Modos de selección:\n"
              "• 🎲 Aleatorio → evita repetir los últimos publicados\n"
-             "• 📋 Secuencial → sigue el orden de los archivos\n"
-             "• 📌 Solo elegidos → publica los que marcaste en el Gestor de Mensajes\n"
-             "• 🔀 Híbrido → primero los elegidos y completa con aleatorio o secuencial\n\n"
-             "¿Cuándo usarlo?\n"
-             "• Cuando quieras publicar manualmente un mensaje bíblico\n"
-             "• Si no tienes tareas automáticas programadas\n\n"
+             "• 📋 Secuencial → sigue el orden de los archivos (001, 002, 003...)\n"
+             "• 📌 Solo elegidos → publica la Cola de publicación del Gestor de Mensajes\n"
+             "• 🔀 Híbrido → primero los de la cola y completa con aleatorio o secuencial\n\n"
+             "Los 📌 Mensajes fijos de una tarea no salen en este botón ni en la rotación normal "
+             "(ver 'Mensajes fijos').\n\n"
              "Configuración relacionada:\n"
              "• Configurador → pestaña Publicar Bíblico (navegador, intentos)\n"
              "• Configurador → pestaña Mensajes (modo, cantidad, memoria, hashtags)\n\n"
-             "⚠️ Cantidad, Solo elegidos e Híbrido requieren versión Completa"),
+             "⚠️ Cantidad mayor a 1, Solo elegidos e Híbrido requieren versión Completa"),
 
             ("📱  Enviar Oraciones por WhatsApp",
              "📱 ENVIAR ORACIONES POR WHATSAPP\n\n"
@@ -1091,129 +1115,201 @@ class PanelControl:
              "¿Qué hace?\n"
              "• Muestra tus destinatarios por defecto ya marcados\n"
              "• Te deja elegir quién recibe la oración en este envío y con qué mensaje\n"
-             "• Abre WhatsApp Web y envía solo a los que marcaste\n"
+             "• Abre WhatsApp Web (con su ventana de consola) y envía solo a los que marcaste\n"
+             "• Cierra solo los avisos de WhatsApp Web (por ejemplo 'Novedades') si aparecen\n"
              "• Usa mensajes distintos para grupos e individuales\n\n"
              "Destinatarios de este envío:\n"
              "• Lo que marques aplica solo a este envío\n"
              "• Tu lista por defecto no cambia, salvo que marques\n"
-             "  '💾 Guardar también como destinatarios por defecto'\n\n"
-             "¿Cuándo usarlo?\n"
-             "• Para convocar a tu comunidad a momentos de oración\n"
-             "• Para enviar una oración puntual a un grupo o persona\n"
+             "  '💾 Guardar también como destinatarios por defecto'\n"
              "• Cada Tarea Automática puede usar la lista por defecto o sus propios destinatarios\n\n"
              "Configuración relacionada:\n"
-             "• Configurador → pestaña Oraciones (navegador, mensajes)\n"
-             "• Configurador → pestaña Oraciones → Destinatarios por defecto\n\n"
+             "• Configurador → pestaña Oraciones (navegador, grupos, mensajes, destinatarios)\n\n"
              "⚠️ Requiere versión Completa"),
 
-            ("🎬  Extraer Predicaciones de WhatsApp",
-             "🎬 EXTRAER PREDICACIONES DE WHATSAPP\n\n"
-             "Extrae enlaces de predicaciones desde un grupo de WhatsApp y los guarda "
-             "para publicarlos después en Facebook.\n\n"
+            ("🎬  Extraer Predicaciones",
+             "🎬 EXTRAER PREDICACIONES\n\n"
+             "Busca enlaces de predicaciones y los deja en cola para publicarlos después en Facebook "
+             "(y enviarlos por correo).\n\n"
+             "Fuentes (Configurador → Extractor):\n"
+             "• 📁 Carpeta de archivos: lee los .txt y .docx (Word) de la carpeta que elijas\n"
+             "• 💬 Grupo de WhatsApp: abre WhatsApp Web y revisa el grupo configurado\n"
+             "• Puedes usar una, la otra o ambas. Con ambas, primero revisa la carpeta y solo abre "
+             "WhatsApp si todavía faltan prédicas\n\n"
+             "Carpeta en Google Drive:\n"
+             "• Instala 'Google Drive para escritorio': tu Drive aparece como una carpeta de Windows "
+             "(por ejemplo G:\\Mi unidad\\Prédicas)\n"
+             "• Elige esa carpeta y todo lo que subas a Drive (incluso desde el celular) se revisa solo\n\n"
              "¿Qué hace?\n"
-             "• Abre WhatsApp Web\n"
-             "• Accede al grupo configurado\n"
-             "• Extrae los enlaces más recientes (YouTube, Instagram, etc.)\n"
-             "• Los guarda en 'cola-facebook/pendientes/'\n\n"
-             "¿Cuándo usarlo?\n"
-             "• Antes de usar 'Publicar Prédica Extraída'\n"
-             "• Cuando tu grupo haya recibido predicaciones nuevas\n\n"
-             "Configuración relacionada:\n"
-             "• Configurador → pestaña Extractor WhatsApp\n"
-             "• Debes configurar el nombre exacto del grupo\n\n"
+             "• Reconoce enlaces de YouTube, Facebook, Instagram, TikTok y Threads\n"
+             "• En WhatsApp sube por la conversación buscando enlaces más antiguos y cierra avisos\n"
+             "• Se detiene cuando hay 5 prédicas pendientes\n"
+             "• Nunca repite un enlace ya publicado o que ya está en cola\n"
+             "• Guarda cada enlace en 'cola-facebook\\pendientes'\n\n"
              "⚠️ Requiere versión Completa"),
 
             ("📤  Publicar Prédica Extraída",
              "📤 PUBLICAR PRÉDICA EXTRAÍDA EN FACEBOOK\n\n"
-             "Toma las predicaciones extraídas del grupo de WhatsApp y las publica "
-             "en Facebook, una por una.\n\n"
+             "Publica en Facebook, una por una, las predicaciones extraídas del grupo de WhatsApp.\n\n"
              "¿Qué hace?\n"
-             "• Lee el primer archivo de 'cola-facebook/pendientes/'\n"
-             "• Agrega el mensaje introductorio configurado\n"
-             "• Publica el enlace en Facebook con previsualización\n"
-             "• Mueve el archivo a 'cola-facebook/publicados/'\n\n"
+             "• Toma la primera prédica de 'cola-facebook\\pendientes'\n"
+             "• Agrega el texto introductorio configurado\n"
+             "• Publica el enlace en Facebook con vista previa\n"
+             "• La mueve a 'cola-facebook\\publicados' y la anota en el historial\n"
+             "• Si encuentra una repetida o ya publicada, la descarta sin publicarla\n\n"
              "¿Cuándo usarlo?\n"
              "• Después de haber extraído predicaciones\n"
-             "• El botón aparece desactivado si no hay pendientes\n\n"
+             "• El botón aparece desactivado si no hay pendientes\n"
+             "• En las tareas, 'Publicar Prédica' siempre va después de 'Extraer'\n\n"
              "Configuración relacionada:\n"
-             "• Configurador → pestaña Extractor (mensaje introductorio)\n\n"
+             "• Configurador → pestaña Extractor (texto introductorio)\n\n"
+             "⚠️ Requiere versión Completa"),
+
+            ("✉️  Enviar por Correo",
+             "✉️ ENVIAR MENSAJE POR CORREO\n\n"
+             "Envía por correo electrónico los mensajes bíblicos y las prédicas a tu lista de destinatarios.\n\n"
+             "¿Qué envía?\n"
+             "• Si en esa misma ejecución se publicó algo en Facebook, envía exactamente eso\n"
+             "• Si no, envía un mensaje bíblico (mensajes fijos de la tarea o rotación normal) "
+             "y la siguiente prédica pendiente que aún no se haya enviado por correo\n"
+             "• Las prédicas enviadas por correo siguen pendientes para Facebook\n"
+             "• En Configurador → Correo eliges si enviar mensajes bíblicos, prédicas o ambos\n\n"
+             "¿Cómo envía?\n"
+             "• Un correo por destinatario: nadie ve los correos de los demás\n"
+             "• Asunto: la primera línea del mensaje (puedes cambiarlo)\n"
+             "• Al final agrega una línea para que puedan pedir no recibir más\n"
+             "• Se puede usar desde ⚡ Acciones, en la Secuencia o en cada Tarea Automática\n\n"
+             "Destinatarios:\n"
+             "• Configurador → Correo → 👥 Destinatarios de correo\n"
+             "• ✅ = recibe por defecto · ⬜ = solo si una tarea lo elige\n"
+             "• Cada tarea puede usar los de por defecto o elegir los suyos\n\n"
+             "Antes de usarlo mira 'Cómo configurar el correo'.\n\n"
+             "⚠️ Requiere versión Completa"),
+
+            ("🔐  Cómo configurar el correo",
+             "🔐 CÓMO CONFIGURAR EL CORREO\n\n"
+             "Gmail, Outlook y Yahoo no permiten que un programa use tu contraseña normal. "
+             "Necesitas una CONTRASEÑA DE APLICACIÓN: un código que solo sirve para enviar correo "
+             "y que puedes borrar cuando quieras.\n\n"
+             "Gmail, paso a paso:\n"
+             "1. Activa la Verificación en 2 pasos de tu cuenta de Google\n"
+             "   (myaccount.google.com/signinoptions/twosv)\n"
+             "2. Entra a myaccount.google.com/apppasswords\n"
+             "3. Escribe un nombre, por ejemplo 'AutomaPro Mensajes Biblicos', y presiona Crear\n"
+             "4. Copia el código de 16 letras (sin tomarle captura ni compartirlo)\n"
+             "5. Configurador → pestaña Correo:\n"
+             "   • Elige Gmail, escribe tu correo y el nombre que verán\n"
+             "   • Pega el código en 'Contraseña de aplicación'\n"
+             "   • Presiona 🧪 Probar conexión: te llega un correo de prueba\n"
+             "   • Presiona 💾 Guardar\n\n"
+             "¿Dónde queda la contraseña?\n"
+             "• Cifrada en el Administrador de credenciales de Windows, no en un archivo\n"
+             "• No necesitas anotarla: si la pierdes, bórrala en Google y crea otra\n\n"
+             "Outlook y Yahoo también usan contraseña de aplicación desde la seguridad de su cuenta. "
+             "Para otro proveedor elige 'Otro' y escribe su servidor y puerto SMTP.\n\n"
+             "Gmail permite alrededor de 500 correos por día."),
+
+            ("📌  Mensajes fijos y cola",
+             "📌 MENSAJES FIJOS Y COLA DE PUBLICACIÓN\n\n"
+             "Hay dos formas de decidir tú qué mensaje se publica:\n\n"
+             "📌 Cola de publicación (Gestor de Mensajes)\n"
+             "• Eliges mensajes con '📌 Elegir para publicar' y los ordenas con ↑ ↓\n"
+             "• Se usa en los modos Solo elegidos o Híbrido (Configurador → Mensajes)\n"
+             "• Cada mensaje sale UNA vez y se quita de la cola\n"
+             "• Afecta a todas las tareas y al Panel\n"
+             "• Ideal para: 'esta semana quiero que salgan estos mensajes'\n\n"
+             "📌 Mensajes fijos (cada Tarea Automática)\n"
+             "• Gestor de Tareas → pestaña ⚡ Acciones → '📌 Mensajes fijos: ✅ Elegir…'\n"
+             "• La tarea publica SIEMPRE esos mensajes, todos los días\n"
+             "• Si son varios se turnan según la cantidad de la tarea (024 → 025 → 026 → 024...)\n"
+             "• Dejan de salir en la rotación normal de las demás tareas y del Panel\n"
+             "• Ideal para anuncios o campañas (por ejemplo, un anuncio diario a las 12:00)\n\n"
              "⚠️ Requiere versión Completa"),
 
             ("⚡  Ejecutar Secuencia",
              "⚡ EJECUTAR SECUENCIA CONFIGURADA\n\n"
-             "Ejecuta automáticamente todos los módulos activados, en el orden "
-             "definido en el Configurador, uno tras otro.\n\n"
+             "Ejecuta, una tras otra, las acciones activadas en el orden que definiste.\n\n"
              "¿Qué hace?\n"
-             "• Lee la lista de módulos activos desde la configuración\n"
-             "• Los ejecuta en orden: Bíblico → Extraer → Prédica → Oraciones\n"
-             "• Cada módulo espera a que el anterior termine antes de iniciar\n\n"
+             "• Lee las acciones activas de Configurador → Secuencia\n"
+             "• Las ejecuta en orden (Bíblico, Extraer, Prédica, Oraciones, Correo)\n"
+             "• Cada acción espera a que la anterior termine\n"
+             "• 'Publicar Prédica' siempre va después de 'Extraer'\n\n"
              "¿Cuándo usarlo?\n"
-             "• Cuando quieras correr todo el flujo de una sola vez\n"
-             "• Ideal para programar con Tareas Automáticas\n\n"
-             "Configuración relacionada:\n"
-             "• Configurador → pestaña Secuencia (activa/desactiva y ordena módulos)\n\n"
+             "• Para correr todo el flujo de una sola vez\n"
+             "• También es el valor inicial de las Tareas Automáticas nuevas\n\n"
              "⚠️ Requiere versión Completa"),
-
-            ("⚙️  Configurador",
-             "⚙️ CONFIGURADOR\n\n"
-             "Panel principal de configuración del sistema. Desde aquí controlas "
-             "el comportamiento de todos los módulos.\n\n"
-             "Pestañas disponibles:\n"
-             "• General → navegador, perfil, modo debug\n"
-             "• Mensajes → modo de selección, cantidad por ejecución, hashtags, historial\n"
-             "• Publicación → tiempos de espera, reintentos\n"
-             "• Extractor WhatsApp → grupo, cantidad a extraer, mensaje intro\n"
-             "• Oraciones → navegador, mensajes de oración, destinatarios\n"
-             "• Secuencia → módulos activos y su orden de ejecución\n"
-             "• Límites → tiempo mínimo entre publicaciones\n\n"
-             "Recuerda presionar 💾 Guardar antes de cerrar."),
-
-            ("📝  Gestor de Mensajes",
-             "📝 GESTOR DE MENSAJES\n\n"
-             "Editor visual para crear, editar y organizar los mensajes bíblicos "
-             "que se publicarán en Facebook.\n\n"
-             "¿Qué puedes hacer?\n"
-             "• Ver todos los mensajes en tu carpeta 'mensajes/'\n"
-             "• Crear mensajes nuevos con el editor\n"
-             "• Editar o eliminar mensajes existentes\n"
-             "• Los archivos se guardan como .txt con nombre 'mensaje-XXX.txt'\n"
-             "• 📌 Elegir mensajes para publicar y ordenar la cola (versión Completa)\n\n"
-             "Consejos:\n"
-             "• Un mensaje por archivo\n"
-             "• Puedes incluir saltos de línea y emojis\n"
-             "• Los elegidos se usan en modo Solo elegidos o Híbrido y salen de la cola al publicarse"),
-
-            ("📊  Estadísticas",
-             "📊 ESTADÍSTICAS\n\n"
-             "Muestra un resumen del historial de publicaciones del sistema.\n\n"
-             "¿Qué información muestra?\n"
-             "• Total de publicaciones realizadas\n"
-             "• Publicaciones exitosas y fallidas\n"
-             "• Tasa de éxito en porcentaje\n"
-             "• Tiempo promedio por publicación\n"
-             "• Fecha de la última publicación\n\n"
-             "Los datos se guardan en 'registro_publicaciones.json' y se "
-             "acumulan con el tiempo."),
 
             ("🗓️  Tareas Automáticas",
              "🗓️ TAREAS AUTOMÁTICAS\n\n"
-             "Programa el sistema para que se ejecute automáticamente en los "
-             "días y horas que elijas, sin que tengas que abrirlo manualmente.\n\n"
-             "¿Qué puedes programar?\n"
-             "• Pestaña 📅 Horario: días de la semana y hora de ejecución\n"
-             "• Pestaña ⚡ Acciones: qué hace cada tarea y en qué orden\n"
-             "  (Bíblico, Extraer, Prédica, Oraciones)\n"
-             "• Destinatarios de oración propios para cada tarea\n"
-             "• Múltiples tareas con distintos horarios y acciones\n\n"
+             "Programa el sistema para que trabaje solo, en los días y horas que elijas.\n\n"
+             "Pestaña 📅 Horario\n"
+             "• Nombre, frecuencia (diaria o semanal), días y hora\n\n"
+             "Pestaña ⚡ Acciones\n"
+             "• Qué hace la tarea y en qué orden (Bíblico, Extraer, Prédica, Oraciones, Correo)\n"
+             "• 📖 Cuántos mensajes bíblicos publica (1 a 10, o la configuración general)\n"
+             "• 📌 Mensajes fijos: mensajes que esta tarea publica siempre\n"
+             "• 📱 Destinatarios de oraciones propios o los de por defecto\n"
+             "• ✉️ Destinatarios de correo propios o los de por defecto\n\n"
              "¿Cómo funciona?\n"
-             "• Usa el Programador de Tareas de Windows\n"
-             "• La tarea se activa aunque no tengas el panel abierto\n"
-             "• El equipo debe estar encendido a la hora programada\n\n"
+             "• Usa el Programador de Tareas de Windows: funciona con el panel cerrado\n"
+             "• El equipo debe estar encendido a la hora programada\n"
+             "• Cada acción muestra su ventana de consola mientras trabaja\n\n"
              "Si falta configuración:\n"
              "• Aparece un aviso con cuenta regresiva de 30 segundos\n"
              "• Si nadie responde, se omite solo esa acción y siguen las demás\n"
              "• Todo queda anotado en 'registro_tareas.log'\n\n"
              "⚠️ Requiere versión Completa"),
+
+            ("⚙️  Configurador",
+             "⚙️ CONFIGURADOR\n\n"
+             "Aquí ajustas cómo trabaja cada parte del sistema.\n\n"
+             "Pestañas:\n"
+             "• Publicar Bíblico → navegador, tiempos e intentos\n"
+             "• Mensajes → modo de selección, cantidad, memoria, hashtags\n"
+             "• Extractor → fuentes (grupo de WhatsApp y/o carpeta), navegador, texto introductorio\n"
+             "• Oraciones → navegador, grupos y contactos, mensajes, destinatarios por defecto\n"
+             "• Correo → cuenta que envía, qué enviar, destinatarios de correo, prueba de conexión\n"
+             "• Secuencia → acciones activas y su orden\n"
+             "• Avanzado → perfil del navegador, ventana maximizada, tiempo mínimo entre publicaciones\n\n"
+             "Recuerda presionar 💾 Guardar antes de cerrar."),
+
+            ("📝  Gestor de Mensajes",
+             "📝 GESTOR DE MENSAJES\n\n"
+             "Editor para crear, editar y organizar tus mensajes bíblicos.\n\n"
+             "¿Qué puedes hacer?\n"
+             "• Ver todos los mensajes de tu carpeta 'mensajes'\n"
+             "• Crear (➕ Nuevo), editar y eliminar mensajes\n"
+             "• 📌 Elegir mensajes para la Cola de publicación y ordenarla (versión Completa)\n\n"
+             "Consejos:\n"
+             "• Un mensaje por archivo (mensaje-001.txt, mensaje-002.txt...)\n"
+             "• La primera línea también se publica y se usa como asunto del correo\n"
+             "• Puedes usar saltos de línea, emojis y enlaces https://\n"
+             "• Algunos emojis se ven como cuadros en el editor pero salen bien en Facebook"),
+
+            ("📊  Estadísticas",
+             "📊 ESTADÍSTICAS\n\n"
+             "Resumen del historial de publicaciones en Facebook.\n\n"
+             "¿Qué muestra?\n"
+             "• Total de publicaciones, exitosas y fallidas\n"
+             "• Tasa de éxito y tiempo promedio por publicación\n"
+             "• Fecha de la última publicación\n\n"
+             "Los datos se guardan en 'registro_publicaciones.json'. "
+             "Los envíos por correo se anotan aparte en 'correo\\registro_envios.json'."),
+
+            ("🔄  Actualizaciones",
+             "🔄 ACTUALIZACIONES\n\n"
+             "El sistema revisa si hay una versión nueva:\n"
+             "• Al abrir el Panel de Control\n"
+             "• Al terminar una Tarea Automática (como máximo un aviso por día)\n\n"
+             "En el aviso puedes elegir:\n"
+             "• Actualizar ahora → descarga e instala la versión nueva\n"
+             "• Más tarde → se vuelve a avisar otro día\n"
+             "  (si nadie responde en 30 segundos, se elige Más tarde)\n\n"
+             "Al actualizar se conserva todo lo tuyo:\n"
+             "• Mensajes creados, editados o borrados\n"
+             "• Tareas automáticas y su configuración\n"
+             "• Configuración, destinatarios, cola de prédicas e historial\n"
+             "• La contraseña del correo (queda en Windows)"),
         ]
 
         header = tk.Frame(ventana, bg="#1a73e8", pady=12)
@@ -1226,7 +1322,7 @@ class PanelControl:
         cuerpo = tk.Frame(ventana, bg="#f0f0f0")
         cuerpo.pack(fill='both', expand=True, padx=15, pady=12)
 
-        panel_izq = tk.Frame(cuerpo, bg="#f0f0f0", width=210)
+        panel_izq = tk.Frame(cuerpo, bg="#f0f0f0", width=245)
         panel_izq.pack(side='left', fill='y', padx=(0, 10))
         panel_izq.pack_propagate(False)
 
@@ -1272,7 +1368,7 @@ class PanelControl:
 
         ventana.protocol("WM_DELETE_WINDOW",
                          lambda: [ventana.grab_release(), ventana.destroy()])
-        self._centrar_ventana(ventana, 780, 520)
+        self._centrar_ventana(ventana, 860, 640)
         ventana.deiconify()
 
     def _toast(self, titulo, mensaje, duracion=3000, color="#28a745"):

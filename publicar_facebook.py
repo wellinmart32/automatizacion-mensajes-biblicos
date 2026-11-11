@@ -24,9 +24,14 @@ from compartido.gestor_archivos import (
     MODULOS_DISPONIBLES,
     contar_predicaciones_pendientes,
     obtener_siguiente_predicacion,
-    mover_predicacion_a_publicados
+    mover_predicacion_a_publicados,
+    problema_fuentes_predicaciones
 )
 from publicadores.publicador_facebook import PublicadorFacebook
+from publicadores.publicador_correo import (
+    enviar_mensajes_por_correo, falta_configuracion_correo, leer_config_correo,
+    destinatarios_correo_por_defecto, registro_para_rotacion, siguiente_predica_para_correo
+)
 from gestor_registro import GestorRegistro
 from gestor_licencias import GestorLicencias
 from dialogos_licencia import DialogosLicencia
@@ -116,6 +121,11 @@ def _iniciar_navegador(publicador):
         publicador.iniciar_navegador()
 
 
+# Lo publicado en Facebook en esta ejecución: el correo envía eso mismo
+_MENSAJES_PUBLICADOS = []
+_PREDICAS_PUBLICADAS = []
+
+
 def _publicar_mensaje_biblico(config):
     print(f"\n{N}{C}▶️  PUBLICAR MENSAJE BÍBLICO{X}")
     gestor = GestorRegistro()
@@ -147,6 +157,7 @@ def _publicar_mensaje_biblico(config):
             exito = publicar_con_reintentos(publicador, mensaje['contenido'], 'biblico', config, gestor, nombre_archivo)
             if exito:
                 exitosos += 1
+                _MENSAJES_PUBLICADOS.append({'nombre': nombre_archivo, 'contenido': mensaje['contenido']})
                 gestor.registrar_publicacion_exitosa(nombre_archivo, '', 0, 1, round(time.time() - inicio, 2), tipo='biblico')
                 if mensaje['elegido']:
                     quitar_mensaje_elegido(nombre_archivo)
@@ -197,6 +208,7 @@ def _publicar_predicacion(config):
     try:
         exito = publicar_con_reintentos(publicador, contenido, 'predicacion', config, gestor, titulo)
         if exito:
+            _PREDICAS_PUBLICADAS.append({'nombre': titulo, 'contenido': contenido, 'url': contenido.split()[-1]})
             gestor.registrar_publicacion_exitosa(titulo, '', 0, 1, 0, tipo='predicacion')
             try:
                 from registro_historial import RegistroHistorialPredicaciones
@@ -211,6 +223,42 @@ def _publicar_predicacion(config):
             gestor.registrar_error(titulo, "Falló después de todos los intentos", tipo='predicacion')
     finally:
         publicador.cerrar_navegador()
+
+
+def _enviar_por_correo(config, destinatarios_correo=None):
+    print(f"\n{N}{C}✉️  ENVIAR MENSAJE POR CORREO{X}")
+    problema = falta_configuracion_correo(destinatarios_correo)
+    if problema:
+        print(f"{A}⚠️  {problema}. Configúralo en el Configurador → pestaña ✉️ Correo{X}")
+        return
+
+    emails = destinatarios_correo or destinatarios_correo_por_defecto()
+    config_correo = leer_config_correo()
+    mensajes = []
+    if _MENSAJES_PUBLICADOS or _PREDICAS_PUBLICADAS:
+        print("📖 Se envía lo mismo que se publicó en Facebook en esta ejecución")
+        if config_correo['enviar_biblicos']:
+            mensajes += _MENSAJES_PUBLICADOS
+        if config_correo['enviar_predicas']:
+            mensajes += _PREDICAS_PUBLICADAS
+    else:
+        if config_correo['enviar_biblicos']:
+            mensajes += obtener_mensajes_a_publicar(registro_para_rotacion(), config)
+        if config_correo['enviar_predicas']:
+            intro = config.get('texto_introduccion_predica', '🎬 Predicación recomendada:') \
+                if config.get('agregar_introduccion_predica', True) else ''
+            predica = siguiente_predica_para_correo(intro)
+            if predica:
+                mensajes.append(predica)
+            else:
+                print("📭 Sin prédicas nuevas para enviar por correo")
+    if not mensajes:
+        print("❌ No hay nada para enviar por correo")
+        return
+
+    enviados, fallidos = enviar_mensajes_por_correo(mensajes, emails)
+    color = V if not fallidos else (A if enviados else R)
+    print(f"\n{color}{N}📊 Correos enviados: {enviados}/{enviados + fallidos}{X}")
 
 
 def _ejecutar_secuencia_full(config):
@@ -241,7 +289,7 @@ def _comando_modulo(nombre_exe, script_relativo):
     return None
 
 
-def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None):
+def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None, destinatarios_correo=None):
     """Ejecuta las acciones en orden. Con id_de_tarea valida cada una antes y nunca se queda esperando respuesta"""
     import subprocess
     import json
@@ -249,7 +297,7 @@ def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None):
     nombres = dict(MODULOS_DISPONIBLES)
 
     for modulo in lista:
-        if id_de_tarea and not _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea):
+        if id_de_tarea and not _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea, destinatarios_correo):
             continue
 
         if modulo == 'biblico':
@@ -259,7 +307,7 @@ def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None):
             comando = _comando_modulo('ExtractorPredicaciones.exe', os.path.join('extractores', 'extractor_whatsapp_predicaciones.py'))
             if comando:
                 print("\n🎬 Iniciando extracción de predicaciones...")
-                subprocess.Popen(comando).wait()
+                subprocess.Popen(comando + ['--sin-pausa']).wait()
             else:
                 print("⚠️  ExtractorPredicaciones.exe no encontrado")
 
@@ -278,9 +326,12 @@ def _ejecutar_modulos(config, lista, destinatarios=None, id_de_tarea=None):
                         json.dump({'grupos': destinatarios}, f, ensure_ascii=False, indent=2)
                     comando = comando + ['--destinatarios', ruta]
                 print("\n📱 Iniciando envío de oraciones...")
-                subprocess.Popen(comando).wait()
+                subprocess.Popen(comando + ['--sin-pausa']).wait()
             else:
                 print("⚠️  OracionesWhatsApp.exe no encontrado")
+
+        elif modulo == 'correo':
+            _enviar_por_correo(config, destinatarios_correo)
 
         if id_de_tarea:
             registrar_evento_tarea(id_de_tarea, f"✅ Ejecutada \"{nombres.get(modulo, modulo).split('  ')[-1]}\"")
@@ -310,7 +361,7 @@ def _abrir_configurador_sin_esperar(pestana):
         print(f"⚠️  No se pudo abrir el Configurador: {e}")
 
 
-def _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea):
+def _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea, destinatarios_correo=None):
     """Revisa lo que necesita una acción de una tarea; si falta algo avisa con cuenta regresiva y la omite"""
     from compartido.aviso_temporizado import AvisoTemporizado
 
@@ -318,12 +369,15 @@ def _validar_modulo_tarea(config, modulo, destinatarios, id_de_tarea):
     problema = None
     pestana = None
 
-    if modulo in ('extraer', 'publicar_predica') and not config.get('nombre_grupo_whatsapp', '').strip():
-        problema = "Falta el nombre del grupo de WhatsApp de prédicas"
+    if modulo == 'extraer' and problema_fuentes_predicaciones():
+        problema = problema_fuentes_predicaciones()
         pestana = 'extractor'
     elif modulo == 'oraciones' and not destinatarios and not _hay_destinatarios_por_defecto():
         problema = "No hay destinatarios de oración por defecto"
         pestana = 'oraciones'
+    elif modulo == 'correo':
+        problema = falta_configuracion_correo(destinatarios_correo)
+        pestana = 'correo'
 
     if not problema:
         return True
@@ -358,6 +412,7 @@ def _ejecutar_tarea(config, id_de_tarea):
     destinatarios = config_tarea.get('destinatarios')
     cantidad = config_tarea.get('cantidad')
     mensajes_fijos = config_tarea.get('mensajes_fijos')
+    destinatarios_correo = config_tarea.get('destinatarios_correo')
     nombres = dict(MODULOS_DISPONIBLES)
     # Copia para no alterar la configuración general que usan los demás módulos
     config = dict(config)
@@ -374,6 +429,8 @@ def _ejecutar_tarea(config, id_de_tarea):
             print(f"   📌 Mensajes fijos: {', '.join(m[:-4] for m in mensajes_fijos)}")
     if 'oraciones' in modulos:
         print(f"   📱 Destinatarios: {f'{len(destinatarios)} propios de la tarea' if destinatarios else 'los de por defecto'}")
+    if 'correo' in modulos:
+        print(f"   ✉️  Correos: {f'{len(destinatarios_correo)} propios de la tarea' if destinatarios_correo else 'los de por defecto'}")
 
     if not modulos:
         print(f"{A}⚠️  La tarea no tiene acciones activas{X}")
@@ -381,7 +438,7 @@ def _ejecutar_tarea(config, id_de_tarea):
         return
 
     registrar_evento_tarea(id_de_tarea, "▶️ Inicio")
-    _ejecutar_modulos(config, modulos, destinatarios, id_de_tarea)
+    _ejecutar_modulos(config, modulos, destinatarios, id_de_tarea, destinatarios_correo)
     registrar_evento_tarea(id_de_tarea, "🏁 Fin")
 
 
@@ -423,14 +480,12 @@ def _validar_y_ejecutar_secuencia(config):
         return
 
     lista = [m.strip() for m in modulos.split(',') if m.strip()]
-    necesita_grupo = 'extraer' in lista or 'publicar_predica' in lista
-    if necesita_grupo:
-        grupo = cfg.get('PREDICACIONES', 'nombre_grupo_whatsapp', fallback='').strip()
-        if not grupo:
+    if 'extraer' in lista:
+        problema = problema_fuentes_predicaciones()
+        if problema:
             respuesta = messagebox.askyesno(
                 "⚠️ Configuración incompleta",
-                "La secuencia incluye 'Extraer Predicaciones' pero no has configurado\n"
-                "el nombre del grupo de WhatsApp.\n\n"
+                f"La secuencia incluye 'Extraer Predicaciones':\n{problema}.\n\n"
                 "¿Deseas ir al Configurador para completarlo ahora?",
                 parent=root
             )
@@ -600,6 +655,10 @@ def main():
             _avisar_actualizacion(args.tarea)
         elif args.modulo == 'publicar_predicaciones':
             _publicar_predicacion(config)
+        elif args.modulo == 'correo' and es_full:
+            _enviar_por_correo(config)
+        elif args.modulo == 'correo':
+            print(f"{A}🔒 El envío por correo está disponible en la versión Completa{X}")
         elif args.solo_biblico:
             _publicar_mensaje_biblico(config)
         elif args.secuencia:
@@ -614,7 +673,18 @@ def main():
         traceback.print_exc()
     finally:
         print(f"\n{N}👋 Finalizando programa...{X}")
+        _esperar_cierre(sin_pausa=bool(args.tarea))
+
+
+def _esperar_cierre(sin_pausa):
+    """En ejecuciones manuales deja la consola abierta para leer el resultado; en tareas se cierra sola"""
+    if sin_pausa:
         time.sleep(2)
+        return
+    try:
+        input("\nPresiona Enter para cerrar...")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 
 def _verificar_wizard_completado():

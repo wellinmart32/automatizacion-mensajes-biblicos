@@ -130,6 +130,87 @@ class ExtractorWhatsAppPredicaciones:
             print(f"⚠️  Error leyendo config navegador: {e}")
         return 'firefox', True, True
 
+    PATRON_URL = (r'https?://(?:www\.)?(?:instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|'
+                  r'tiktok\.com|threads\.com|threads\.net)[^\s<>"\']+')
+
+    def _leer_fuentes(self):
+        """(usar WhatsApp, usar carpeta, ruta de la carpeta) según Configurador → Extractor"""
+        config = configparser.RawConfigParser(delimiters=('=',))
+        config.read(self.archivo_config, encoding='utf-8')
+
+        def valor(clave, defecto):
+            return config.get('PREDICACIONES', clave, fallback=defecto).split('#')[0].strip()
+
+        return (valor('extraer_de_whatsapp', 'si').lower() == 'si',
+                valor('extraer_de_carpeta', 'no').lower() == 'si',
+                valor('carpeta_predicaciones', ''))
+
+    def _leer_texto_archivo(self, ruta):
+        """Texto de un .txt o .docx (sin librerías extra: un .docx es un zip con XML)"""
+        import re
+        import html
+        import zipfile
+        if ruta.lower().endswith('.txt'):
+            for codificacion in ('utf-8', 'latin-1'):
+                try:
+                    with open(ruta, 'r', encoding=codificacion) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+            return ''
+        with zipfile.ZipFile(ruta) as docx:
+            xml = docx.read('word/document.xml').decode('utf-8', errors='ignore')
+            # Los enlaces insertados con "Insertar vínculo" guardan la URL aparte, en las relaciones
+            try:
+                rels = docx.read('word/_rels/document.xml.rels').decode('utf-8', errors='ignore')
+            except KeyError:
+                rels = ''
+        xml = xml.replace('</w:p>', '\n')
+        texto = re.sub(r'<[^>]+>', '', xml)
+        enlaces = ' '.join(re.findall(r'Target="(https?://[^"]+)"', rels))
+        return html.unescape(texto + '\n' + enlaces)
+
+    def extraer_de_carpeta(self, carpeta):
+        """Busca enlaces de prédicas en los .txt y .docx de una carpeta (local o sincronizada con Google Drive)"""
+        import re
+        print(f"\n{N}{C}📂 EXTRACCIÓN DESDE CARPETA{X}")
+        print(f"   {carpeta}")
+        if not os.path.isdir(carpeta):
+            print(f"{R}❌ La carpeta no existe. Revísala en Configurador → Extractor{X}")
+            return []
+
+        conocidas = self.urls_ya_conocidas()
+        archivos = [f for f in os.listdir(carpeta)
+                    if f.lower().endswith(('.txt', '.docx')) and not f.startswith('~$')]
+        # Primero los archivos más recientes, igual que WhatsApp empieza por los mensajes más nuevos
+        archivos.sort(key=lambda f: os.path.getmtime(os.path.join(carpeta, f)), reverse=True)
+        print(f"   📄 Archivos encontrados: {len(archivos)}")
+
+        nuevas = []
+        numero = self.obtener_siguiente_numero()
+        for archivo in archivos:
+            if self.contar_pendientes() + len(nuevas) >= self.PREDICACIONES_OBJETIVO:
+                break
+            try:
+                texto = self._leer_texto_archivo(os.path.join(carpeta, archivo))
+            except Exception as e:
+                print(f"   ⚠️  No se pudo leer {archivo} ({type(e).__name__})")
+                continue
+            for url in re.findall(self.PATRON_URL, texto):
+                url = url.rstrip('.,;:)]}')
+                if url in conocidas or not self._es_url_valida(url):
+                    continue
+                conocidas.add(url)
+                nuevas.append({'numero': numero, 'tipo': 'enlace', 'contenido': url})
+                print(f"   {V}✅ Nueva: predica-{numero:03d}.txt{X}  ({archivo})")
+                print(f"      URL: {url[:60]}...")
+                numero += 1
+                if self.contar_pendientes() + len(nuevas) >= self.PREDICACIONES_OBJETIVO:
+                    break
+
+        print(f"   📦 Extraídas de la carpeta: {len(nuevas)}")
+        return nuevas
+
     def leer_nombre_grupo(self):
         """Nombre del grupo configurado en Configurador → Extractor WhatsApp"""
         try:
@@ -720,15 +801,28 @@ class ExtractorWhatsAppPredicaciones:
         print(f"{N}{C}" + " " * 10 + "📱 EXTRACTOR DE PREDICACIONES - VERSIÓN FINAL" + X)
         print(f"{N}{C}" + "="*70 + X + "\n")
         
+        usar_whatsapp, usar_carpeta, ruta_carpeta = self._leer_fuentes()
+        de_carpeta = []
+        if usar_carpeta:
+            de_carpeta = self.extraer_de_carpeta(ruta_carpeta)
+            if de_carpeta:
+                self.guardar_predicaciones(de_carpeta)
+
+        if not usar_whatsapp:
+            return de_carpeta
+        if usar_carpeta and self.contar_pendientes() >= self.PREDICACIONES_OBJETIVO:
+            print(f"\n✅ Ya hay {self.contar_pendientes()} prédicas pendientes: no hace falta abrir WhatsApp")
+            return de_carpeta
+
         try:
             if not self.iniciar_navegador():
-                return []
+                return de_carpeta
             
             if not self.esperar_whatsapp_cargado():
-                return []
+                return de_carpeta
             
             if not self.buscar_grupo(nombre_grupo):
-                return []
+                return de_carpeta
             
             predicaciones = self.extraer_siguiente_lote(
                 cantidad=cantidad,
@@ -739,7 +833,7 @@ class ExtractorWhatsAppPredicaciones:
             if predicaciones:
                 self.guardar_predicaciones(predicaciones)
             
-            return predicaciones
+            return de_carpeta + (predicaciones or [])
             
         finally:
             self.cerrar()
@@ -759,4 +853,11 @@ if __name__ == "__main__":
     extractor = ExtractorWhatsAppPredicaciones()
     extractor.ejecutar(extractor.leer_nombre_grupo())
     print("\n👋 Finalizando programa...")
-    time.sleep(2)
+    # Dentro de una tarea o secuencia se cierra sola; abierto desde el Panel espera a que leas el resultado
+    if '--sin-pausa' in sys.argv:
+        time.sleep(2)
+    else:
+        try:
+            input("\nPresiona Enter para cerrar...")
+        except (EOFError, KeyboardInterrupt):
+            pass
